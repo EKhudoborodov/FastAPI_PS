@@ -9,6 +9,7 @@ conn = psycopg2.connect(database="server_db",
 
 cursor = conn.cursor()
 
+"""
 #FOR SIGN IN AND SIGN UP
 def stop_sessions():
     flask.session['user'] = None # session for user_id
@@ -19,6 +20,7 @@ def stop_sessions():
     flask.session['article_id'] = None # session for id of latest openned article
     flask.session['title'] = None # session for title of latest oppend article
     return 0
+"""
 
 def crypt_role(role):
     if role=='writer':
@@ -62,6 +64,12 @@ def update_reviews(article_name, user_id, article_id, review, path):
     
 
 #CHECK
+def field_check(field):
+    for char in field:
+        if char == "'" or char == " ":
+            return 0
+    return 1
+
 def authorization_check(validate_role, direction):
     ban = flask.session.get('ban')
     user_roles = flask.session.get('role')
