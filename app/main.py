@@ -83,7 +83,11 @@ def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
 @app.get("/archive")
 def archive(credentials: OAuth2PasswordRequestForm = Depends(security)):
     return src.functional.select_table_desc(credentials)
-    
+
+@app.get("/{article_name}")
+def archive(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.authorization_check_article(credentials, article_name)
+
 @app.get("/role")
 def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
     if credentials[0] == '5':

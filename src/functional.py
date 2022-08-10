@@ -137,7 +137,7 @@ def authorization_check_draft(credentials, article):
         cursor.execute(f"SELECT * FROM public.article WHERE name='{article}'")
         records = list(cursor.fetchall())
         if records == []:
-            return exception(status.HTTP_400_BAD_REQUEST, "There is no such article in database.")
+            return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
         title = records[0][2]
         reason = records[0][3]
         user_id=get_user_id(credentials)
@@ -153,51 +153,46 @@ def authorization_check_draft(credentials, article):
         records = list(cursor.fetchall())
         return {'user': user_id, 'article_text': text, 'title': title, 'status': records[0][1]}
         
-def authorization_check_article(article_name):
-    ban = flask.session.get('ban')
-    user_roles = flask.session.get('role')
-    if user_roles == None:
-        return flask.redirect(flask.url_for('.sign_in_start'))
-    else:
-        new_publish = f"({check_writer_uploads()})"
-        cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False} ")
-        records = list(cursor.fetchall())
-        if records == []:
-            return flask.render_template("article.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, article_name=article_name, no_article=1)
+def authorization_check_article(credentials, article_name):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    new_publish = f"({check_writer_uploads()})"
+    cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False}")
+    records = list(cursor.fetchall())
+    if records == []:
+        return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")       
+    user_id = get_user_id(credentials)
+    article_id = records[0][0]
+    cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id}")
+    check = list(cursor.fetchall())
+    status_id = check[0][1]
+    #checking if article is aprooved.
+    if status_id != 3:
+        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id} and user_id={user_id}")
+        check = list(cursor.fetchall())
+        if check == []:
+            return exception(status.HTTP_400_BAD_REQUEST, "This article ism't published.")
         else:
-            user_id = flask.session.get('user')
-            article_id = records[0][0]
-            flask.session['article_id'] = article_id
-            cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id}")
-            check = list(cursor.fetchall())
-            status_id = check[0][1]
-            #checking if article is aprooved.
-            if status_id != 3:
-                cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id} and user_id={user_id}")
-                check = list(cursor.fetchall())
-                if check != []:
-                    return flask.redirect(flask.url_for('.draft_start'))
-                else:
-                    if status_id == 1:
-                        return flask.render_template("article.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, article_name=article_name, not_published=1)
-                    elif status_id == 2:
-                        return flask.render_template("article.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, article_name=article_name, not_aprooved=1)
-                    else:
-                        desc = records[0][3]
-                        return flask.render_template("article.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, article_name=article_name, denied=1, reason=desc)
-            else:
-                #here must be tags
-                title = records[0][2]
-                path = f".\\articles\\{article_name}.txt"
-                text = form_text(path)
-                topic = get_topic(article_id)
-                rate = get_rating(article_id)
-                user_review=review_check(user_id, article_id, article_name)
-                cursor.execute(f"UPDATE public.user_read SET isread={True} WHERE user_id={user_id} and article_id={article_id} and isread={False}")
-                conn.commit()
-                return flask.render_template("article.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, article_name=article_name, title=title, text=text, rate=rate, user_rate=user_review[0], user_review=user_review[1], user_date=user_review[2])
-            #path = f".\\reviews\\{article_name}.txt"
-            #reviews = form_text(path)
+            title = records[0][2]
+            path = f".\\articles\\{article_name}.txt"
+            text = form_text(path)
+            article_status = get_article_status(status_id)
+            {'name': article_name, 'status': article_status, 'title': title, 'article_text': article_text}
+    else:
+        #here must be tags
+        title = records[0][2]
+        path = f".\\articles\\{article_name}.txt"
+        text = form_text(path)
+        topic = get_topic(article_id)
+        rate = get_rating(article_id)
+        user_review=review_check(user_id, article_id, article_name)
+        reviews = select_reviews(credentials, article_id)
+        article_status = get_article_status(status_id)
+        cursor.execute(f"UPDATE public.user_read SET isread={True} WHERE user_id={user_id} and article_id={article_id} and isread={False}")
+        conn.commit()
+        return {'name': article_name, 'status': article_status, 'topic': topic, 'rating': rate, 'title': title, 'article_text': text, 'user_review': user_review, 'reviews': reviews}
+        #path = f".\\reviews\\{article_name}.txt"
+        #reviews = form_text(path)
             
         
 def check_writer_uploads():
@@ -233,7 +228,7 @@ def review_check(user_id, article_id, article_name):
             if wrong == 0:
                 review = line[len(formed_id)+1:]
                 break
-    return [rate, review, date]
+    return {'rating': rate, 'review': review, 'date': date}
 
 def is_author(article_id, user_id):
     cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id='{article_id}' and user_id='{user_id}'")
@@ -372,6 +367,16 @@ def get_topic_id(topic):
         topic_id = 4
     return topic_id
 
+def get_article_status(status_id):
+    if status_id == 1:
+        return "draft"
+    elif status_id == 2:
+        return "published"
+    elif status_id == 3:
+        return "aprooved"
+    else:
+        return "denied"
+
 def get_title(article_name):
     cursor.execute(f"SELECT * FROM public.article WHERE name = '{article_name}'")
     records = list(cursor.fetchall())
@@ -499,10 +504,9 @@ def select_table_personal(credentials):
         array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
-def select_reviews():
+def select_reviews(credentials, article_id):
     #author, username, rate, review, date
-    user_id = flask.session.get('user')
-    article_id = flask.session.get('article_id')
+    user_id = get_user_id(credentials)
     array = []
     cursor.execute(f"SELECT * FROM public.article WHERE id={article_id}")
     records = list(cursor.fetchall())
