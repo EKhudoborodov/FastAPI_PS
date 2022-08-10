@@ -415,7 +415,9 @@ def select_role(roles):
             res[3]=1
     return res
 
-def select_table_desc():
+def select_table_desc(credentials):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     cursor.execute(f"SELECT * FROM public.article WHERE isdeleted={False}")
     records = list(cursor.fetchall())
     array = []
@@ -442,7 +444,11 @@ def select_table_desc():
             array += {'name':name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
-def select_table_published():
+def select_table_published(credentials):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '2' and credentials[1] != '2':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or moderator.")
     cursor.execute(f"SELECT * FROM public.article_status WHERE status_id={2}")
     records = list(cursor.fetchall())
     array = []
@@ -466,8 +472,8 @@ def select_table_published():
         array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
-def select_table_personal():
-    user_id = flask.session.get('user')
+def select_table_personal(credentials):
+    user_id = get_user_id(credentials)
     cursor.execute(f"SELECT * FROM public.article_writer WHERE user_id={user_id}")
     records = list(cursor.fetchall())
     array = []
@@ -532,6 +538,8 @@ def select_reviews():
 
 #for selecting articles aprooved recently
 def select_table_recent(credentials):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     current_date = get_current_date() # get date
     user_id = get_user_id(credentials) # get user id
     cursor.execute(f"SELECT * FROM public.article WHERE isdeleted={False}") # selecting all not deleted articles

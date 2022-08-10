@@ -81,8 +81,8 @@ def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
     return src.functional.select_table_recent(credentials)
 
 @app.get("/archive")
-def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.select_table_desc()
+def archive(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.select_table_desc(credentials)
     
 @app.get("/role")
 def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -138,6 +138,14 @@ def update_role(username: str, role: str = Query(default="writer", description="
                         cursor.execute(f"UPDATE public.users SET banned={True} WHERE id={user_id}")
                         conn.commit()
                         return f"{username} is banned now."
+
+@app.get("/workshop")
+def workshop(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.select_table_personal(credentials)
+
+@app.get("/published")
+def published(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.select_table_published(credentials)
 
 @app.get("/create")
 def create(article_name: str = Query(min_length=3, max_length=50), title: str = Query(min_length=3, max_length=50), topic:str = Query(default="science", description="Print 'science', 'art', 'history' or 'news'"), credentials: OAuth2PasswordRequestForm = Depends(security)):
