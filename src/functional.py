@@ -351,6 +351,15 @@ def build_html(direction):
     return 0
 """
 #GET
+def get_user_id(credential):
+    for i in range(len(credential)):
+        if credential[i] == " ":
+            username = credential[(i+1):]
+            break
+    cursor.execute(f"SELECT * FROM public.users WHERE login = '{username}'")
+    records = list(cursor.fetchall())
+    return records[0][0]
+
 def get_topic(article_id):
     cursor.execute(f"SELECT * FROM public.article_topic WHERE article_id={article_id}")
     article_desc = list(cursor.fetchall())
@@ -358,6 +367,17 @@ def get_topic(article_id):
     topic_desc = list(cursor.fetchall())
     topic = topic_desc[0][1]
     return topic
+
+def get_topic_id(topic):
+    if topic == "science":
+        topic_id = 1
+    elif topic == "art":
+        topic_id = 2
+    elif topic == "history":
+        topic_id = 3
+    else:
+        topic_id = 4
+    return topic_id
 
 def get_rating(article_id):
     cursor.execute(f"SELECT * FROM public.rating WHERE article_id={article_id} and isdeleted={False}")
@@ -547,7 +567,7 @@ def select_table_recent():
 
 
 """  
-TESTS
+#TESTS
 if __name__ == '__main__':
     time = str(datetime.datetime.now())
     time = time[0:10]

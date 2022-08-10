@@ -1,4 +1,5 @@
-import os, psycopg2, uvicorn, app.functional
+import os, psycopg2, uvicorn, src.functional
+from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 app = FastAPI()
@@ -32,43 +33,31 @@ async def token(form_data: OAuth2PasswordRequestForm = Depends()):
     if records != []:
         cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}")
         user_desc = list(cursor.fetchall())
-        return {'access_token': f"{user_desc[0][1]}" + " " + form_data.username}
+        token = ""
+        for desc in user_desc:
+            if desc[1] != 5:
+                token += f"{desc[1]}"
+            else:
+                token = 5
+                break
+        token += " " + form_data.username
+        return {'access_token': token}
     else:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return exception(status.HTTP_401_UNAUTHORIZED, "Incorrect username or password")
         
 @app.get("/sign_up")
 def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), password: str = Query(min_length=8, max_length=50), confirm_password: str = Query(min_length=8, max_length=50)):
-    if functional.field_check(username) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BADREQUEST,
-            detail="You can't use space or apostrophe in username.",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) 
-    if functional.field_check(password) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BADREQUEST,
-            detail="You can't use space or apostrophe in password.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )      
+    if src.functional.field_check(username) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
+    if src.functional.field_check(password) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in password.")   
     if password != confirm_password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BADREQUEST,
-            detail="Passwords are different!",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        return exception(status.HTTP_400_BAD_REQUEST, "Passwords are different.")   
     else:
         cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'", (str(username), str(password)))
         records = list(cursor.fetchall())
         if records != []:
-            raise HTTPException(
-                status_code=status.HTTP_400_BADREQUEST,
-                detail="This username has already taken.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            return exception(status.HTTP_400_BAD_REQUEST, "This username has already taken.") 
         else:
             cursor.execute(f"INSERT INTO public.users (login, password, fullname, banned) VALUES ('{username}', '{password1}', '{fullname}', {False})")
             conn.commit()
@@ -93,42 +82,25 @@ def read_current_user(credentials: OAuth2PasswordRequestForm = Depends(security)
     
 @app.get("/role")
 def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
-    if credentials[0] != '1':
-        raise HTTPException(
-            status_code=status.HTTP_423_LOCKED,
-            detail="You aren't administrator.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator.")
     else:
-        if functional.field_check(username) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BADREQUEST,
-                detail="You can't use space or apostrophe in username.",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) 
+        if src.functional.field_check(username) == 0:
+            return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
         else:
             cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
             records = list(cursor.fetchall())
             if records == []:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BADREQUEST,
-                    detail="There is no such user in database.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                return exception(status.HTTP_400_BAD_REQUEST, "There is no such user in database.")
             elif role != "writer" and role != "moderator" and role != "ban":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BADREQUEST,
-                    detail="Print 'writer', 'moderator' or 'ban' in role field.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                return exception(status.HTTP_400_BAD_REQUEST, "Print 'writer', 'moderator' or 'ban' in role field.")
             elif action != "add" and action != "remove":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BADREQUEST,
-                    detail="Print 'add' or 'remove'. in action field.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                return exception(status.HTTP_400_BAD_REQUEST, "Print 'add' or 'remove'. in action field.")
             else:
-                role_id = functional.crypt_role(role)
+                role_id = src.functional.crypt_role(role)
+                user_id = records[0][0]
                 if role_id != 5:
                     if action == 'remove':
                         #removing user's role
@@ -145,6 +117,7 @@ def update_role(username: str, role: str = Query(default="writer", description="
                     else:
                         #adding role to user
                         cursor.execute(f"INSERT INTO public.role_user (user_id, role_id) VALUES ({user_id}, {role_id})")
+                        cursor.execute(f"DELETE FROM public.role_user WHERE user_id={user_id} and role_id={4}")
                         conn.commit()
                         return "Role is seccessfuly added."
                 else:
@@ -162,4 +135,40 @@ def update_role(username: str, role: str = Query(default="writer", description="
                         conn.commit()
                         return f"{username} is banned now."
 
+@app.get("/create")
+def create(article_name: str = Query(min_length=3, max_length=50), title: str = Query(min_length=3, max_length=50), topic:str = Query(default="science", description="Print 'science', 'art', 'history' or 'news'"), credentials: OAuth2PasswordRequestForm = Depends(security)):
+    topic = topic.lower()
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
+    elif src.functional.field_check(article_name) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in article name.")
+    elif topic != "science" and topic != "art" and topic != "history" and topic != "news":
+        return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news' in topic field.")
+    else:
+        for char in title:
+            if char == "'":
+                return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in title.")
+        cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+        records = list(cursor.fetchall())
+        if records != []:
+            return exception(status.HTTP_400_BAD_REQUEST, "This article name has already taken.")
+        else:
+            topic_id = src.functional.get_topic_id(topic)
+            user_id = src.functional.get_user_id(credentials)
+            path = f".\\articles\\{article_name}.txt"
+            time = src.functional.get_current_date()
+            cursor.execute(f"INSERT INTO public.article (name, title, description, isdeleted, date) VALUES ('{article_name}', '{title}', '{path}', {False}, '{time}')")
+            conn.commit()
+            cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+            records = list(cursor.fetchall())
+            cursor.execute(f"INSERT INTO public.article_status (article_id, status_id) VALUES ({records[0][0]}, 1)")
+            cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({records[0][0]}, {user_id}, {True})")
+            cursor.execute(f"INSERT INTO public.article_topic (article_id, topic_id) VALUES ({records[0][0]}, {topic_id})")
+            conn.commit()
+            with open(path, "w") as file:
+                file.write("")
+            return "Article is created."
+        
     
