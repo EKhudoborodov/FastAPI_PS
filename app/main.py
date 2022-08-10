@@ -76,9 +76,13 @@ def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), p
             conn.commit()
             return {"username": username, "password": password}
 
-@app.get("/users/me")
-def read_current_user(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return credentials
+@app.get("/home")
+def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.select_table_recent(credentials)
+
+@app.get("/archive")
+def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.select_table_desc()
     
 @app.get("/role")
 def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -171,4 +175,14 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
                 file.write("")
             return "Article is created."
         
+@app.post("/create/{article_name}")
+def draft(article_name, title: str | None = Query(min_length=3, max_length=50, default=None), article_text: str | None = None, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    article_desc = src.functional.authorization_check_draft(credentials, article_name)
+    print(article_desc)
+    return article_desc
     
+
+
+@app.get("/users/me")
+def read_current_user(credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return credentials

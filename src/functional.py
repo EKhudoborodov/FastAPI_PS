@@ -1,5 +1,7 @@
 import requests, psycopg2, cv2, datetime
 import flask
+from fastapi import status, HTTPException
+from src.exceptions import exception
 
 conn = psycopg2.connect(database="server_db",
                         user="postgres",
@@ -126,40 +128,31 @@ def authorization_check_published(article_name):
     else:
         return flask.redirect(flask.url_for('.home'))
 
-def authorization_check_draft(article):
-    roles = flask.session.get('role')
-    ban = flask.session.get('ban')
-    if roles == None:
-        return flask.redirect(flask.url_for('.sign_in_start'))
-    elif roles[0] == 1 or roles[2] == 1:
+def authorization_check_draft(credentials, article):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
+    else:
         cursor.execute(f"SELECT * FROM public.article WHERE name='{article}'")
         records = list(cursor.fetchall())
         if records == []:
-            return flask.render_template('draft.html', no_article = 1)
-        else:
-            title = records[0][2]
-            reason = records[0][3]
-            cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={records[0][0]} and user_id={flask.session.get('user')}")
-            recs = list(cursor.fetchall())
-            if recs == []:
-                return flask.redirect(flask.url_for('.workshop'))
-            author = is_author(records[0][0], flask.session.get('user'))
-            path = f".\\articles\\{article}.txt"
-            text = form_text(path)
-            new_publish = f"({check_writer_uploads()})"
-            cursor.execute(f"SELECT * FROM public.article_status WHERE article_id='{records[0][0]}'")
-            records = list(cursor.fetchall())
-            if records[0][1] == 1:
-                return flask.render_template('draft.html', ban=ban, a=roles[0], m=roles[1], w=roles[2], new_publish=new_publish, text=text, title=title, author=author)
-            elif records[0][1] == 2:
-                return flask.render_template('draft.html', ban=ban, a=roles[0], m=roles[1], w=roles[2], new_publish=new_publish, text=text, title=title, author=author, publish=1)
-            elif records[0][1] == 3:
-                return flask.render_template('draft.html', ban=ban, a=roles[0], m=roles[1], w=roles[2], new_publish=new_publish, text=text, title=title, author=author, aprooved=1)
-            else:
-                return flask.render_template('draft.html', ban=ban, a=roles[0], m=roles[1], w=roles[2], new_publish=new_publish, text=text, title=title, author=author, reason=reason, denied=1)
-    else:
-        return flask.redirect(flask.url_for('.home'))
-
+            return exception(status.HTTP_400_BAD_REQUEST, "There is no such article in database.")
+        title = records[0][2]
+        reason = records[0][3]
+        user_id=get_user_id(credentials)
+        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={records[0][0]} and user_id={user_id}")
+        recs = list(cursor.fetchall())
+        if recs == []:
+            return exception(status.HTTP_400_BAD_REQUEST, "You aren't author or redactor of this article.")
+        author = is_author(records[0][0], user_id)
+        path = f".\\articles\\{article}.txt"
+        text = form_text(path)
+        new_publish = f"({check_writer_uploads()})"
+        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id='{records[0][0]}'")
+        records = list(cursor.fetchall())
+        return {'user': user_id, 'article_text': text, 'title': title, 'status': records[0][1]}
+        
 def authorization_check_article(article_name):
     ban = flask.session.get('ban')
     user_roles = flask.session.get('role')
@@ -379,6 +372,11 @@ def get_topic_id(topic):
         topic_id = 4
     return topic_id
 
+def get_title(article_name):
+    cursor.execute(f"SELECT * FROM public.article WHERE name = '{article_name}'")
+    records = list(cursor.fetchall())
+    return records[0][2]
+
 def get_rating(article_id):
     cursor.execute(f"SELECT * FROM public.rating WHERE article_id={article_id} and isdeleted={False}")
     rating_desc = list(cursor.fetchall())
@@ -533,9 +531,9 @@ def select_reviews():
     return array
 
 #for selecting articles aprooved recently
-def select_table_recent():
+def select_table_recent(credentials):
     current_date = get_current_date() # get date
-    user_id = flask.session.get('user') # get user id
+    user_id = get_user_id(credentials) # get user id
     cursor.execute(f"SELECT * FROM public.article WHERE isdeleted={False}") # selecting all not deleted articles
     records = list(cursor.fetchall())
     array = []
