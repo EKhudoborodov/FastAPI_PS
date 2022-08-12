@@ -66,9 +66,9 @@ def update_reviews(article_name, user_id, article_id, review, path):
     
 
 #CHECK
-def field_check(field):
+def field_check(field, space_check):
     for char in field:
-        if char == "'" or char == " ":
+        if char == "'" or (char == " " and space_check == 1):
             return 0
     return 1
 
@@ -140,23 +140,26 @@ def authorization_check_draft(credentials, article):
             return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
         title = records[0][2]
         reason = records[0][3]
+        date = records[0][5]
         user_id=get_user_id(credentials)
         cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={records[0][0]} and user_id={user_id}")
         recs = list(cursor.fetchall())
         if recs == []:
-            return exception(status.HTTP_400_BAD_REQUEST, "You aren't author or redactor of this article.")
+            return exception(status.HTTP_423_LOCKED, "You aren't author or redactor of this article.")
         author = is_author(records[0][0], user_id)
         path = f".\\articles\\{article}.txt"
         text = form_text(path)
         new_publish = f"({check_writer_uploads()})"
         cursor.execute(f"SELECT * FROM public.article_status WHERE article_id='{records[0][0]}'")
         records = list(cursor.fetchall())
-        return {'user': user_id, 'article_text': text, 'title': title, 'status': records[0][1]}
+        return {'user_id': user_id, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
         
 def authorization_check_article(credentials, article_name):
     if credentials[0] == '5':
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     new_publish = f"({check_writer_uploads()})"
+    if field_check(article_name, 0) == 0:
+        return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
     cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False}")
     records = list(cursor.fetchall())
     if records == []:

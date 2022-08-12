@@ -1,4 +1,5 @@
 import os, psycopg2, uvicorn, src.functional
+from pydantic import BaseModel
 from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -11,6 +12,13 @@ conn = psycopg2.connect(database="server_db",
                         port="5432")
 
 cursor = conn.cursor()
+
+class Draft(BaseModel):
+    title: str = "",
+    article_text: str = ""
+
+class Review(BaseModel):
+    review_text : str = ""
 
 """
 users: {id, login, password, fullname, isbanned}
@@ -47,9 +55,9 @@ async def token(form_data: OAuth2PasswordRequestForm = Depends()):
         
 @app.get("/sign_up")
 def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), password: str = Query(min_length=8, max_length=50), confirm_password: str = Query(min_length=8, max_length=50)):
-    if src.functional.field_check(username) == 0:
+    if src.functional.field_check(username, 1) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
-    if src.functional.field_check(password) == 0:
+    if src.functional.field_check(password, 1) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in password.")   
     if password != confirm_password:
         return exception(status.HTTP_400_BAD_REQUEST, "Passwords are different.")   
@@ -85,8 +93,12 @@ def archive(credentials: OAuth2PasswordRequestForm = Depends(security)):
     return src.functional.select_table_desc(credentials)
 
 @app.get("/{article_name}")
-def archive(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
     return src.functional.authorization_check_article(credentials, article_name)
+
+@app.post("/{article_name}")
+def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return {'rate': rate, 'review_text': review_text.review_text}
 
 @app.get("/role")
 def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -95,7 +107,7 @@ def update_role(username: str, role: str = Query(default="writer", description="
     elif credentials[0] != '1':
         return exception(status.HTTP_423_LOCKED, "You aren't administrator.")
     else:
-        if src.functional.field_check(username) == 0:
+        if src.functional.field_check(username, 1) == 0:
             return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
         else:
             cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
@@ -158,14 +170,13 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
         return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
-    elif src.functional.field_check(article_name) == 0:
-        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in article name.")
     elif topic != "science" and topic != "art" and topic != "history" and topic != "news":
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news' in topic field.")
+    elif src.functional.field_check(article_name, 0) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in article name.")
+    elif src.functional.field_check(title, 0) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in title.")
     else:
-        for char in title:
-            if char == "'":
-                return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in title.")
         cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
         records = list(cursor.fetchall())
         if records != []:
@@ -186,11 +197,41 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
             with open(path, "w") as file:
                 file.write("")
             return "Article is created."
-        
-@app.post("/create/{article_name}")
-def draft(article_name, title: str | None = Query(min_length=3, max_length=50, default=None), article_text: str | None = None, credentials: OAuth2PasswordRequestForm = Depends(security)):
+
+@app.get("/create/{article_name}")
+def get_draft(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
     article_desc = src.functional.authorization_check_draft(credentials, article_name)
-    print(article_desc)
+    return article_desc
+   
+@app.post("/create/{article_name}")
+def update_draft(article_name, action: str = Query(default="save", description="Print 'save', 'publish' or 'delete'."),article: Draft = Draft(), credentials: OAuth2PasswordRequestForm = Depends(security)):
+    article_desc = src.functional.authorization_check_draft(credentials, article_name)
+    path = f".\\articles\\{article_name}.txt"
+    cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+    records=list(cursor.fetchall())
+    if action == "save":
+        if article.title != "":
+            article_desc['title'] = article.title
+            cursor.execute(f"UPDATE public.article SET title='{article.title}' WHERE name='{article_name}'")
+        if article.article_text != "":
+            article_desc['article_text'] = article.article_text
+            with open(path, "w") as file:
+                file.writelines(article_desc['article_text'])
+    elif action == "publish":
+        if article.title != "":
+            article_desc['title'] = article.title
+            cursor.execute(f"UPDATE public.article SET title='{article.title}' WHERE name='{article_name}'")
+        if article.article_text != "":
+            article_desc['article_text'] = article.article_text
+            with open(path, "w") as file:
+                file.writelines(article_desc['article_text'])
+        cursor.execute(f"UPDATE public.article SET date='{src.functional.get_current_date()}' WHERE name='{article_name}'")
+    elif action == "delete":
+        cursor.execute(f"UPDATE public.article SET isdeleted={True} WHERE name='{article_name}'")
+        cursor.execute(f"UPDATE public.article_status SET status_id={5} WHERE article_id={records[0][0]}")
+    else:
+        return exception(status.HTTP_400_BAD_REQUEST, "Print 'save', 'publish' or 'delete'. in action field.")
+    conn.commit()
     return article_desc
     
 
