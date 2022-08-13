@@ -14,7 +14,7 @@ conn = psycopg2.connect(database="server_db",
 cursor = conn.cursor()
 
 class Draft(BaseModel):
-    title: str = "",
+    title: str = ""
     article_text: str = ""
 
 class Review(BaseModel):
@@ -199,7 +199,7 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
             return "Article is created."
 
 @app.get("/create/{article_name}")
-def get_draft(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
     article_desc = src.functional.authorization_check_draft(credentials, article_name)
     return article_desc
    
@@ -209,7 +209,12 @@ def update_draft(article_name, action: str = Query(default="save", description="
     path = f".\\articles\\{article_name}.txt"
     cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
     records=list(cursor.fetchall())
-    if action == "save":
+    if action == "delete":
+        cursor.execute(f"UPDATE public.article SET isdeleted={True} WHERE name='{article_name}'")
+        cursor.execute(f"UPDATE public.article_status SET status_id={5} WHERE article_id={records[0][0]}")
+    elif article_desc['article_status'] != 1:
+        return {'warning': "You can't update published or deleted article.", 'article_info': article_desc}
+    elif action == "save":
         if article.title != "":
             article_desc['title'] = article.title
             cursor.execute(f"UPDATE public.article SET title='{article.title}' WHERE name='{article_name}'")
@@ -225,10 +230,9 @@ def update_draft(article_name, action: str = Query(default="save", description="
             article_desc['article_text'] = article.article_text
             with open(path, "w") as file:
                 file.writelines(article_desc['article_text'])
-        cursor.execute(f"UPDATE public.article SET date='{src.functional.get_current_date()}' WHERE name='{article_name}'")
-    elif action == "delete":
-        cursor.execute(f"UPDATE public.article SET isdeleted={True} WHERE name='{article_name}'")
-        cursor.execute(f"UPDATE public.article_status SET status_id={5} WHERE article_id={records[0][0]}")
+        article_desc['article_status'] = 2
+        cursor.execute(f"UPDATE public.article_status SET status_id={2} WHERE article_id={records[0][0]}")
+        cursor.execute(f"UPDATE public.article SET date='{src.functional.get_current_date()}' WHERE name='{article_name}'")  
     else:
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'save', 'publish' or 'delete'. in action field.")
     conn.commit()
