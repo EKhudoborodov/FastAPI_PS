@@ -9,6 +9,10 @@ class Draft(BaseModel):
 class Review(BaseModel):
     review_text : str = ""
 
+class Action_review(str, Enum):
+    send = "send"
+    delete = "delete"
+
 class Select_role(str, Enum):
     moderator = "moderator"
     writer = "writer"

@@ -1,0 +1,6 @@
+fastapi
+opencv-python
+psycopg2
+psycopg2-binary
+uvicorn
+pydantic

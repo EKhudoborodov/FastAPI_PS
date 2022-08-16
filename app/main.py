@@ -1,6 +1,6 @@
 import os, psycopg2, uvicorn, src.functional
 from enum import Enum
-from src.classes import Draft, Review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field, Action_create, Published, Editors
+from src.classes import Draft, Review, Action_review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field, Action_create, Published, Editors
 from pydantic import BaseModel
 from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
@@ -33,29 +33,33 @@ security = OAuth2PasswordBearer(tokenUrl="sign_in")
 async def token(form_data: OAuth2PasswordRequestForm = Depends()):
     cursor.execute(f"SELECT * FROM public.users WHERE login='{form_data.username}' AND password='{form_data.password}'")
     records = list(cursor.fetchall())
-    if records != []:
-        cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}")
-        user_desc = list(cursor.fetchall())
-        token = ""
-        for desc in user_desc:
-            if desc[1] != 5:
-                token += f"{desc[1]}"
-            else:
-                token = 5
-                break
-        token += " " + form_data.username
-        return {'access_token': token}
-    else:
+    if records == []:
         return exception(status.HTTP_401_UNAUTHORIZED, "Incorrect username or password")
+    cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}")
+    user_desc = list(cursor.fetchall())
+    token = ""
+    for desc in user_desc:
+        if desc[1] != 5:
+            token += f"{desc[1]}"
+        else:
+            token = 5
+            break
+    token += " " + form_data.username
+    return {'access_token': token}
         
 @app.get("/sign_up")
-def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), password: str = Query(min_length=8, max_length=50), confirm_password: str = Query(min_length=8, max_length=50)):
+def sign_up(
+                fullname: str,
+                username: str = Query(min_length=4, max_length=50),
+                password: str = Query(min_length=8, max_length=50),
+                confirm_password: str = Query(min_length=8, max_length=50)
+           ):
     if src.functional.field_check(username, 1) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
     if src.functional.field_check(password, 1) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in password.")   
     if password != confirm_password:
-        return exception(status.HTTP_400_BAD_REQUEST, "Passwords are different.")   
+        return exception(status.HTTP_400_BAD_REQUEST, "Passwords are different.")
     else:
         cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'", (str(username), str(password)))
         records = list(cursor.fetchall())
@@ -104,8 +108,43 @@ def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Dep
     return src.functional.authorization_check_article(credentials, article_name)
 
 @app.post("/archive/{article_name}")
-def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return {'rate': rate, 'review_text': review_text.review_text}
+def send_review(
+                    article_name,
+                    action: Action_review,
+                    rate: int = Query(ge=1, le=5),
+                    review_text: Review = Review(),
+                    credentials: OAuth2PasswordRequestForm = Depends(security)
+               ):
+    article_desc = src.functional.authorization_check_article(credentials, article_name)
+    user_id = src.functional.get_user_id(credentials)
+    user_review = article_desc['user_review']
+    article_id = article_desc['article_id']
+    date = src.functional.get_current_date()
+    path = f".\\reviews\\{article_name}.txt"
+    if action == "send":
+        if user_review['rating'] != None: # check if user had already written review for the article
+            src.functional.update_reviews(article_name, user_id, article_id, review_text.review_text, path)
+            cursor.execute(f"UPDATE public.rating SET date='{date}', rate={rate}, isdeleted={False} WHERE user_id={user_id} and article_id={article_id}")
+        else:
+            with open(path, "r") as file:
+                lines = file.readlines()
+            file.close()
+            lines += f"{user_id}:{review_text.review_text}\n"
+            text = src.functional.form_article(lines)
+            with open(path, "w") as file:
+                file.write(text)
+            file.close()
+            cursor.execute(f"INSERT INTO public.rating (user_id, article_id, date, rate, isdeleted) VALUES ({user_id}, {article_id}, '{date}', {rate}, {False})")
+        event = "Review is sent."
+    else:
+        if user_review['rating'] == None: # check if user had already written review for the article
+            return exception(status.HTTP_400_BAD_REQUEST, "You didn't write review for this article.")
+        event = "Review is deleted."
+        cursor.execute(f"UPDATE public.rating SET isdeleted={True} WHERE user_id={user_id} and article_id={article_id}")
+        src.functional.delete_review(article_name, user_id, article_id, path)
+    conn.commit()
+    article_desc = src.functional.authorization_check_article(credentials, article_name)
+    return {'event': event,'article_desc': article_desc}
 
 @app.get("/role")
 def update_role(

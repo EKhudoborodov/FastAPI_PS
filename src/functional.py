@@ -1,5 +1,4 @@
-import requests, psycopg2, cv2, datetime
-import flask
+import psycopg2, cv2, datetime
 from fastapi import status, HTTPException
 from src.exceptions import exception
 
@@ -56,7 +55,31 @@ def update_reviews(article_name, user_id, article_id, review, path):
         file.write(text)
     file.close()
     return 0
-    
+
+def delete_review(article_name, user_id, article_id, path):
+    with open(path, "r") as file:
+        lines = file.readlines()
+    file.close()
+    new_lines = [""]
+    formed_id = str(user_id)
+    for line in lines:
+        wrong = 1
+        for i in range(len(formed_id)):
+            if line[i] == formed_id[i]:
+                wrong = 0
+            else:
+                wrong = 1
+                break
+        if wrong == 0:
+            continue
+        else:
+            new_lines += line
+    text = form_article(new_lines)
+    with open(path, "w") as file:
+        file.write(text)
+    file.close()
+    return 0
+
 #CHECK
 def field_check(field, space_check):
     for char in field:
@@ -172,7 +195,7 @@ def authorization_check_article(credentials, article_name):
         article_status = get_article_status(status_id)
         cursor.execute(f"UPDATE public.user_read SET isread={True} WHERE user_id={user_id} and article_id={article_id} and isread={False}")
         conn.commit()
-        return {'name': article_name, 'status': article_status, 'topic': topic, 'rating': rate, 'title': title, 'article_text': text, 'user_review': user_review, 'reviews': reviews}
+        return {'article_id': article_id, 'name': article_name, 'status': article_status, 'topic': topic, 'rating': rate, 'title': title, 'article_text': text, 'user_review': user_review, 'reviews': reviews}
         #path = f".\\reviews\\{article_name}.txt"
         #reviews = form_text(path)
             
