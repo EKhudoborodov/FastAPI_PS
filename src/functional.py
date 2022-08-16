@@ -72,17 +72,11 @@ def field_check(field, space_check):
             return 0
     return 1
 
-def authorization_check(validate_role, direction):
-    ban = flask.session.get('ban')
-    user_roles = flask.session.get('role')
-    if user_roles == None:
-        return flask.redirect(flask.url_for('.sign_in_start'))
-    elif user_roles[0] == 1 or user_roles[validate_role] == 1 or direction == 'home':
-        #a - admin, m - moder, w - writer, r - reader;
-        new_publish = f"({check_writer_uploads()})"
-        return flask.render_template(f"{direction}.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish)
-    else:
-        return flask.redirect(flask.url_for('.home'))
+def ban_check(credentials):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    else: 
+        return None
 
 def authorization_editors_check(article_id):
     ban = flask.session.get('ban')
@@ -241,6 +235,16 @@ def is_author(article_id, user_id):
     else:
         return 0
 
+def search_input_check(search_field, topic, rate, views):
+    if topic != None and topic != 'science' and topic != 'art' and topic != 'history' and topic != 'news':
+        return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news'. in topic filter field.")
+    if search_field != None and search_field != 'name' and search_field != 'author' and search_field != 'topic' and search_field != 'date':
+        return exception(status.HTTP_400_BAD_REQUEST, "Print 'name', 'author', 'topic' or 'date' in search field.")
+    if rate != None and rate != '1' and rate != '2' and rate != '3' and rate != '4' and rate != '5' and rate != '>1' and rate != '>2' and rate != '>3' and rate != '>4' and rate != '>5' and rate != '<1' and rate != '<2' and rate != '<3' and rate != '<4' and rate != '<5':
+        return exception(status.HTTP_400_BAD_REQUEST, "Print number from 1 to 5. Additional: Print '>' or '<' at the beggining in rate filter field.")
+    if views != None and views[0] != '<' and views[0] != '>' and not views[1:].isdigit():
+        return exception(status.HTTP_400_BAD_REQUEST, "Print '>' or '<' at the begining and then number of views in views filter field.")
+
 """
 def workshop_check(user_id, roles, no_article):
     new_publish = f"({check_writer_uploads()})"
@@ -271,17 +275,14 @@ def workshop_check(user_id, roles, no_article):
 
 
 #FORM
-def form_text(path):
+def form_text(path): # function that reads file with article text and then puts it in one str
     check = 1
     with open(path, "r") as text_file:
         lines = text_file.readlines()
     text_file.close()
-    if path[2:10] == 'articles':
-        return form_article(lines)
-    #else:
-        #return form_reviews(lines)
+    return form_article(lines)
 
-def form_article(lines):
+def form_article(lines): # function that puts article text in one str
     if lines == []:
         return None
     else:
@@ -296,13 +297,101 @@ def form_article(lines):
         #print(new_lines)
         return new_lines
 
-def form_read_colums(article_id):
+def form_read_colums(article_id): # function that makes read event for each article for each user (for reboot)
     cursor.execute(f"SELECT * FROM public.users")
     records = list(cursor.fetchall())
     for rec in records:
         cursor.execute(f"INSERT INTO public.user_read (user_id, article_id, isread) VALUES ({rec[0]}, {article_id}, {False})")
     conn.commit()
     return 0
+
+def sort_articles(array):  # function that sorts list of articles by topic
+    science_array, art_array, history_array, news_array = [], [], [], []
+    for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+        if record['topic'] == "science":
+            science_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        elif record['topic'] == "art":
+            art_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        elif record['topic'] == "history":
+            history_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        elif record['topic'] == "news":
+            news_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+    if science_array == []:
+        science_array = None
+    if art_array == []:
+        art_array = None
+    if history_array == []:
+        history_array = None
+    if news_array == []:
+        news_array = None
+    return {'science': science_array, 'art': art_array, 'history': history_array, 'news': news_array}
+
+def search_by_name(array, field, value): # choose articles that contain value in name, authors, topic or date.
+    search_res = []
+    if field == None:
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            if value in record['name'] or value in record['author'] or value in record['topic'] or value in record['date']:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        return sort_articles(search_res)
+    else:
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            if value in record[f"{field}"]:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        return sort_articles(search_res)
+
+def search_by_rate(array, rate_filter):
+    search_res = []
+    if rate_filter == None:
+        return array
+    if rate_filter[0].isdigit():
+        rate = int(rate_filter)
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            if record['reviews'] >= rate and record['reviews'] < rate+1:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        return search_res
+    else:
+        rate = int(rate_filter[1])
+        if rate_filter[0] == '>':
+            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+                if record['reviews'] >= rate:
+                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            return search_res
+        elif rate_filter[0] == '<':
+            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+                if record['reviews'] <= rate:
+                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            return search_res
+
+def search_by_views(array, views_filter):
+    search_res = []
+    if views_filter == None:
+        return array
+    views = int(views_filter[1:])
+    if views_filter[0] == '>':
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            if record['views'] >= views:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        return search_res
+    else:
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            if record['views'] <= views:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        return search_res
+
+def search_start(array, search_field, search_value, topic_filter, rate_filter, views_filter): # function for searching articles
+    search_input_check(search_field, topic_filter, rate_filter, views_filter) # check if every input is fine
+    array = search_by_rate(array, rate_filter) # update article list with rate filter
+    array = search_by_views(array, views_filter) # update article list with views filter
+    if topic_filter == None:
+        if search_value == None:
+            return sort_articles(array)
+        return search_by_name(array, search_field, search_value)
+    else:
+        if search_value == None:
+            array = sort_articles(array)
+            return {f"{topic_filter}": array[f"{topic_filter}"]}
+        array = search_by_name(array, search_field, search_value)
+        return {f"{topic_filter}": array[f"{topic_filter}"]}
 
 """
 def form_reviews(article_id):
@@ -342,7 +431,7 @@ def build_html(direction):
     return 0
 """
 #GET
-def get_user_id(credential):
+def get_user_id(credential): # get user id from access token
     for i in range(len(credential)):
         if credential[i] == " ":
             username = credential[(i+1):]
@@ -351,7 +440,7 @@ def get_user_id(credential):
     records = list(cursor.fetchall())
     return records[0][0]
 
-def get_topic(article_id):
+def get_topic(article_id): # get article topic by article id
     cursor.execute(f"SELECT * FROM public.article_topic WHERE article_id={article_id}")
     article_desc = list(cursor.fetchall())
     cursor.execute(f"SELECT * FROM public.topic WHERE id={article_desc[0][1]}")
@@ -360,6 +449,10 @@ def get_topic(article_id):
     return topic
 
 def get_topic_id(topic):
+    cursor.execute(f"SELECT * FROM public.topic WHERE name='{topic}'")
+    rec = list(cursor.fetchall())
+    return rec[0][0]
+    """
     if topic == "science":
         topic_id = 1
     elif topic == "art":
@@ -369,8 +462,13 @@ def get_topic_id(topic):
     else:
         topic_id = 4
     return topic_id
+    """
 
 def get_article_status(status_id):
+    cursor.execute(f"SELECT * FROM public.status WHERE id={status_id}")
+    rec = list(cursor.fetchall())
+    return rec[0][1]
+    """
     if status_id == 1:
         return "draft"
     elif status_id == 2:
@@ -379,6 +477,7 @@ def get_article_status(status_id):
         return "aprooved"
     else:
         return "denied"
+    """
 
 def get_title(article_name):
     cursor.execute(f"SELECT * FROM public.article WHERE name = '{article_name}'")
@@ -475,40 +574,46 @@ def select_table_published(credentials):
             authors += desc[0][3] + ", "
         authors=authors[0:len(authors)-2]
         topic = get_topic(article_id)
-        reviews = '-'
+        reviews = 0
         views = 0
         array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
 def select_table_personal(credentials):
-    user_id = get_user_id(credentials)
-    cursor.execute(f"SELECT * FROM public.article_writer WHERE user_id={user_id}")
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    if credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
+    user_id = get_user_id(credentials) # get user id
+    cursor.execute(f"SELECT * FROM public.article_writer WHERE user_id={user_id}") # select articles where user is author or redactor
     records = list(cursor.fetchall())
     array = []
     for rec in records:
         article_id = rec[0]
-        cursor.execute(f"SELECT * FROM public.article WHERE id={article_id}")
+        cursor.execute(f"SELECT * FROM public.article WHERE id={article_id}") # select article info
         article_desc = list(cursor.fetchall())
-        name = article_desc[0][1]
-        date = article_desc[0][5]
-        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}")
+        name = article_desc[0][1] # get article name
+        date = article_desc[0][5] # get date of article's creation/publication
+        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}") # select article's writers
         check = list(cursor.fetchall())
         authors = ""
         for log in check:
-            cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
+            cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}") # select writer info
             desc = list(cursor.fetchall())
-            authors += desc[0][3] + ", "
-        authors=authors[0:len(authors)-2]
-        topic = get_topic(article_id)
-        reviews = get_rating(article_id)
-        cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
+            authors += desc[0][3] + ", " # form str of authors
+        authors=authors[0:len(authors)-2] # remove ", " from end of authors str
+        topic = get_topic(article_id) # get topic id
+        reviews = get_rating(article_id) # get article's rating
+        cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}") # select article's views info
         views_check = list(cursor.fetchall())
-        views = len(views_check)
+        views = len(views_check) # get number of article views
         array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
 def select_reviews(credentials, article_id):
     #author, username, rate, review, date
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     user_id = get_user_id(credentials)
     array = []
     cursor.execute(f"SELECT * FROM public.article WHERE id={article_id}")
@@ -573,15 +678,21 @@ def select_table_recent(credentials):
             reviews = get_rating(article_id) # getting article's rating 
             cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
             views_check = list(cursor.fetchall())
-            views = len(views_check) # getting article's views
+            views = len(views_check) # get number of article views
             array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}, # form array
     return array
-        
 
 
 """  
 #TESTS
 if __name__ == '__main__':
+    test = "1234557645324"
+    print(test[1:])
+    print(test[1:].isdigit())
+    test = {'science': [{'test': 1, 'res': 2}, {'test': 2, 'res': 1}], 'art': [{'test': 3, 'res': 4}, {'test': 3, 'res': 5}]}
+    for rec in test:
+        print(rec) # science, art
+        print(test[f"{rec}"]) # [{'test': 1, 'res': 2}, {'test': 2, 'res': 1}], [{'test': 3, 'res': 4}, {'test': 3, 'res': 5}]
     time = str(datetime.datetime.now())
     time = time[0:10]
     print(time)

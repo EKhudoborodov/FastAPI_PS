@@ -85,23 +85,36 @@ def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), p
             return {"username": username, "password": password}
 
 @app.get("/home")
-def home(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.select_table_recent(credentials)
+def home(
+            search_value: str = None,
+            search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
+            topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
+            rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+            views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
+            credentials: OAuth2PasswordRequestForm = Depends(security)
+        ):
+    home_array = src.functional.select_table_recent(credentials)
+    return src.functional.search_start(home_array, search_field, search_value, topic_filter, rate_filter, views_filter)
 
 @app.get("/archive")
-def archive(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.select_table_desc(credentials)
-
-@app.get("/{article_name}")
-def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.authorization_check_article(credentials, article_name)
-
-@app.post("/{article_name}")
-def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return {'rate': rate, 'review_text': review_text.review_text}
+def archive(
+                search_value: str = None,
+                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
+                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
+                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
+                credentials: OAuth2PasswordRequestForm = Depends(security)
+            ):
+    archive_array = src.functional.select_table_desc(credentials)
+    return src.functional.search_start(archive_array, search_field, search_value, topic_filter, rate_filter, views_filter)
 
 @app.get("/role")
-def update_role(username: str, role: str = Query(default="writer", description="Print 'writer', 'moderator' or 'ban'."), action: str = Query(default="add", description="Print 'add' or 'remove'."), credentials: OAuth2PasswordRequestForm = Depends(security)):
+def update_role(
+                    username: str,
+                    role: str = Query(description="Print 'writer', 'moderator' or 'ban'.", default = "writer"),
+                    action: str = Query(description="Print 'add' or 'remove'.", default = "add"),
+                    credentials: OAuth2PasswordRequestForm = Depends(security)
+                ):
     if credentials[0] == '5':
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     elif credentials[0] != '1':
@@ -156,12 +169,28 @@ def update_role(username: str, role: str = Query(default="writer", description="
                         return f"{username} is banned now."
 
 @app.get("/workshop")
-def workshop(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.select_table_personal(credentials)
+def workshop(
+                search_value: str = None,
+                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
+                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
+                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
+                credentials: OAuth2PasswordRequestForm = Depends(security)
+            ):
+    workshop_array = src.functional.select_table_personal(credentials)
+    return src.functional.search_start(workshop_array, search_field, search_value, topic_filter, rate_filter, views_filter)
 
 @app.get("/published")
-def published(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.select_table_published(credentials)
+def published(
+                search_value: str = None,
+                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
+                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
+                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
+                credentials: OAuth2PasswordRequestForm = Depends(security)
+             ):
+    published_array = src.functional.select_table_published(credentials)
+    return src.functional.search_start(published_array, search_field, search_value, topic_filter, rate_filter, views_filter)
 
 @app.get("/create")
 def create(article_name: str = Query(min_length=3, max_length=50), title: str = Query(min_length=3, max_length=50), topic:str = Query(default="science", description="Print 'science', 'art', 'history' or 'news'"), credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -197,6 +226,15 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
             with open(path, "w") as file:
                 file.write("")
             return "Article is created."
+
+@app.get("/{article_name}")
+def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.authorization_check_article(credentials, article_name)
+
+@app.post("/{article_name}")
+def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return {'rate': rate, 'review_text': review_text.review_text}
+
 
 @app.get("/create/{article_name}")
 def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -237,9 +275,3 @@ def update_draft(article_name, action: str = Query(default="save", description="
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'save', 'publish' or 'delete'. in action field.")
     conn.commit()
     return article_desc
-    
-
-
-@app.get("/users/me")
-def read_current_user(credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return credentials
