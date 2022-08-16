@@ -1,4 +1,6 @@
 import os, psycopg2, uvicorn, src.functional
+from enum import Enum
+from src.classes import Draft, Review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field
 from pydantic import BaseModel
 from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
@@ -12,13 +14,6 @@ conn = psycopg2.connect(database="server_db",
                         port="5432")
 
 cursor = conn.cursor()
-
-class Draft(BaseModel):
-    title: str = ""
-    article_text: str = ""
-
-class Review(BaseModel):
-    review_text : str = ""
 
 """
 users: {id, login, password, fullname, isbanned}
@@ -87,9 +82,9 @@ def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), p
 @app.get("/home")
 def home(
             search_value: str = None,
-            search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
-            topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
-            rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+            search_field: Select_search_field = None,
+            topic_filter: Select_topic = None,
+            rate_filter: Select_rate = None,
             views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
             credentials: OAuth2PasswordRequestForm = Depends(security)
         ):
@@ -99,9 +94,9 @@ def home(
 @app.get("/archive")
 def archive(
                 search_value: str = None,
-                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
-                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
-                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                search_field: Select_search_field = None,
+                topic_filter: Select_topic = None,
+                rate_filter: Select_rate = None,
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
             ):
@@ -111,8 +106,8 @@ def archive(
 @app.get("/role")
 def update_role(
                     username: str,
-                    role: str = Query(description="Print 'writer', 'moderator' or 'ban'.", default = "writer"),
-                    action: str = Query(description="Print 'add' or 'remove'.", default = "add"),
+                    role: Select_role,
+                    action: Action_role,
                     credentials: OAuth2PasswordRequestForm = Depends(security)
                 ):
     if credentials[0] == '5':
@@ -171,9 +166,9 @@ def update_role(
 @app.get("/workshop")
 def workshop(
                 search_value: str = None,
-                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
-                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
-                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                search_field: Select_search_field = None,
+                topic_filter: Select_topic = None,
+                rate_filter: Select_rate = None,
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
             ):
@@ -183,9 +178,9 @@ def workshop(
 @app.get("/published")
 def published(
                 search_value: str = None,
-                search_field: str = Query(description="Print 'name', 'author', 'topic' or 'date'.", default = None),
-                topic_filter: str = Query(description="Print 'science', 'art', 'history' or 'news'.", default = None),
-                rate_filter: str = Query(description="Print number from 1 to 5. Additional: Print '>' or '<' at the beggining.", default = None),
+                search_field: Select_search_field = None,
+                topic_filter: Select_topic = None,
+                rate_filter: Select_rate = None,
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
              ):
@@ -199,8 +194,8 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
         return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
-    elif topic != "science" and topic != "art" and topic != "history" and topic != "news":
-        return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news' in topic field.")
+    #elif topic != "science" and topic != "art" and topic != "history" and topic != "news":
+        #return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news' in topic field.")
     elif src.functional.field_check(article_name, 0) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in article name.")
     elif src.functional.field_check(title, 0) == 0:
@@ -234,7 +229,6 @@ def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Dep
 @app.post("/{article_name}")
 def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
     return {'rate': rate, 'review_text': review_text.review_text}
-
 
 @app.get("/create/{article_name}")
 def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -275,3 +269,4 @@ def update_draft(article_name, action: str = Query(default="save", description="
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'save', 'publish' or 'delete'. in action field.")
     conn.commit()
     return article_desc
+    
