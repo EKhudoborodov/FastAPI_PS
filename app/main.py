@@ -1,6 +1,6 @@
 import os, psycopg2, uvicorn, src.functional
 from enum import Enum
-from src.classes import Draft, Review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field
+from src.classes import Draft, Review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field, Action_create, Published, Editors
 from pydantic import BaseModel
 from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
@@ -68,14 +68,10 @@ def sign_up(fullname: str, username: str = Query(min_length=4, max_length=50), p
             records = list(cursor.fetchall())
             cursor.execute(f"INSERT INTO public.role_user (user_id, role_id) VALUES ('{records[0][0]}', 4)")
             conn.commit()
-            cursor.execute(f"SELECT * FROM public.article WHERE isdeleted={False}")
+            cursor.execute(f"SELECT * FROM public.article_status WHERE status_id={3}")
             article_desc = list(cursor.fetchall())
             for article in article_desc:
-                article_id = article[0]
-                cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id}")
-                status_desc = list(cursor.fetchall())
-                if status_desc[0][1] == 3:
-                    cursor.execute(f"INSERT INTO public.user_read (user_id, article_id, isread) VALUES ({records[0][0]}, {article_id}, {False})")
+                cursor.execute(f"INSERT INTO public.user_read (user_id, article_id, isread) VALUES ({records[0][0]}, {article[0]}, {False})")
             conn.commit()
             return {"username": username, "password": password}
 
@@ -102,6 +98,14 @@ def archive(
             ):
     archive_array = src.functional.select_table_desc(credentials)
     return src.functional.search_start(archive_array, search_field, search_value, topic_filter, rate_filter, views_filter)
+
+@app.get("/archive/{article_name}")
+def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.authorization_check_article(credentials, article_name)
+
+@app.post("/archive/{article_name}")
+def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return {'rate': rate, 'review_text': review_text.review_text}
 
 @app.get("/role")
 def update_role(
@@ -175,27 +179,18 @@ def workshop(
     workshop_array = src.functional.select_table_personal(credentials)
     return src.functional.search_start(workshop_array, search_field, search_value, topic_filter, rate_filter, views_filter)
 
-@app.get("/published")
-def published(
-                search_value: str = None,
-                search_field: Select_search_field = None,
-                topic_filter: Select_topic = None,
-                rate_filter: Select_rate = None,
-                views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
-                credentials: OAuth2PasswordRequestForm = Depends(security)
-             ):
-    published_array = src.functional.select_table_published(credentials)
-    return src.functional.search_start(published_array, search_field, search_value, topic_filter, rate_filter, views_filter)
-
 @app.get("/create")
-def create(article_name: str = Query(min_length=3, max_length=50), title: str = Query(min_length=3, max_length=50), topic:str = Query(default="science", description="Print 'science', 'art', 'history' or 'news'"), credentials: OAuth2PasswordRequestForm = Depends(security)):
+def create(
+                topic: Select_topic,
+                article_name: str = Query(min_length=3, max_length=50), 
+                title: str = Query(min_length=3, max_length=50),
+                credentials: OAuth2PasswordRequestForm = Depends(security)
+          ):
     topic = topic.lower()
     if credentials[0] == '5':
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
         return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
-    #elif topic != "science" and topic != "art" and topic != "history" and topic != "news":
-        #return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news' in topic field.")
     elif src.functional.field_check(article_name, 0) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in article name.")
     elif src.functional.field_check(title, 0) == 0:
@@ -222,13 +217,50 @@ def create(article_name: str = Query(min_length=3, max_length=50), title: str = 
                 file.write("")
             return "Article is created."
 
-@app.get("/{article_name}")
-def read_article_desc(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return src.functional.authorization_check_article(credentials, article_name)
+@app.get("/editors/{article_name}")
+def editors_menu(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.authorization_editors_check(article_name, credentials)
 
-@app.post("/{article_name}")
-def send_review(article_name, rate: int = Query(ge=1, le=5), review_text: Review = Review(), credentials: OAuth2PasswordRequestForm = Depends(security)):
-    return {'rate': rate, 'review_text': review_text.review_text}
+@app.post("/editors/{article_name}")
+def editors_menu(
+                    article_name, 
+                    username: str,
+                    role: Editors,
+                    action: Action_role,
+                    credentials: OAuth2PasswordRequestForm = Depends(security)
+                ):
+    author_desc = src.functional.authorization_editors_check(article_name, credentials)
+    cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
+    records = list(cursor.fetchall())
+    if records == []:
+        return exception(status.HTTP_400_BAD_REQUEST, "There is no such user in database.")
+    user_id = records[0][0]
+    if action == "add":
+        if role == "redactor":
+            if username in author_desc['authors']:
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={False} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else:
+                cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({author_desc['article_id']}, {user_id}, {False})")
+            event=f"{username} is now redactor of this article."
+        else:
+            if username in author_desc['authors']:
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={True} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else:
+                cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({author_desc['article_id']}, {user_id}, {True})")
+            event=f"{username} is now author of this article."
+    elif action == "remove":
+        if not username in author_desc['authors']:
+            return exception(status.HTTP_400_BAD_REQUEST, "This user isn't a redactor of this article.")
+        else:
+            if role == "redactor":
+                event=f"{username} isn't redactor of this article anymore."
+                cursor.execute(f"DELETE FROM public.article_writer WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else:
+                event=f"{username} is now redactor of this article."
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={False} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+    conn.commit()
+    author_desc = src.functional.authorization_editors_check(article_name, credentials)
+    return {'event': event, 'author_desc': author_desc}
 
 @app.get("/create/{article_name}")
 def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
@@ -236,7 +268,12 @@ def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depe
     return article_desc
    
 @app.post("/create/{article_name}")
-def update_draft(article_name, action: str = Query(default="save", description="Print 'save', 'publish' or 'delete'."),article: Draft = Draft(), credentials: OAuth2PasswordRequestForm = Depends(security)):
+def update_draft(
+                    article_name, 
+                    action: Action_create,
+                    article: Draft = Draft(),
+                    credentials: OAuth2PasswordRequestForm = Depends(security)
+                ):
     article_desc = src.functional.authorization_check_draft(credentials, article_name)
     path = f".\\articles\\{article_name}.txt"
     cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
@@ -245,7 +282,20 @@ def update_draft(article_name, action: str = Query(default="save", description="
         cursor.execute(f"UPDATE public.article SET isdeleted={True} WHERE name='{article_name}'")
         cursor.execute(f"UPDATE public.article_status SET status_id={5} WHERE article_id={records[0][0]}")
     elif article_desc['article_status'] != 1:
-        return {'warning': "You can't update published or deleted article.", 'article_info': article_desc}
+        if action == "back_to_draft":
+            cursor.execute(f"UPDATE public.article SET isdeleted={False} WHERE id={article_desc['article_id']}")
+            cursor.execute(f"UPDATE public.article_status SET status_id={1} WHERE article_id={article_desc['article_id']}")
+            cursor.execute(f"DELETE FROM public.user_read WHERE article_id={article_desc['article_id']}")
+            cursor.execute(f"DELETE FROM public.rating WHERE article_id={article_desc['article_id']}")
+            path = f".\\reviews\\{article_name}.txt"
+            with open(path, "w") as file:
+                file.write("")
+            file.close()
+            article_desc['article_status'] = 1
+            conn.commit()
+            return {'event': "Article is draft now.", 'article_info': article_desc}
+        else:
+            return {'warning': "You can't update published or deleted article.", 'article_info': article_desc}
     elif action == "save":
         if article.title != "":
             article_desc['title'] = article.title
@@ -265,8 +315,34 @@ def update_draft(article_name, action: str = Query(default="save", description="
         article_desc['article_status'] = 2
         cursor.execute(f"UPDATE public.article_status SET status_id={2} WHERE article_id={records[0][0]}")
         cursor.execute(f"UPDATE public.article SET date='{src.functional.get_current_date()}' WHERE name='{article_name}'")  
-    else:
-        return exception(status.HTTP_400_BAD_REQUEST, "Print 'save', 'publish' or 'delete'. in action field.")
     conn.commit()
     return article_desc
+
+@app.get("/published")
+def published(
+                search_value: str = None,
+                search_field: Select_search_field = None,
+                topic_filter: Select_topic = None,
+                rate_filter: Select_rate = None,
+                views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
+                credentials: OAuth2PasswordRequestForm = Depends(security)
+             ):
+    published_array = src.functional.select_table_published(credentials)
+    return src.functional.search_start(published_array, search_field, search_value, topic_filter, rate_filter, views_filter)
+
+@app.get("/published/{article_name}")
+def get_published_article(article_name, credentials: OAuth2PasswordRequestForm = Depends(security)):
+    return src.functional.authorization_check_published(article_name, credentials)
+
+@app.post("/published/{article_name}")
+def get_published_article(
+                            article_name, 
+                            action: Published,
+                            reason: str = Query(description="Print reason of rejection here.",default=None),
+                            credentials: OAuth2PasswordRequestForm = Depends(security)
+                         ):
+    article_desc = src.functional.authorization_check_published(article_name, credentials)
+    return article_desc
+
+
     

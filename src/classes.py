@@ -2,6 +2,7 @@ from enum import Enum
 from pydantic import BaseModel
 
 class Draft(BaseModel):
+    hashteg: str = ""
     title: str = ""
     article_text: str = ""
 
@@ -41,3 +42,17 @@ class Select_topic(str, Enum):
     art = "art"
     history = "history"
     news = "news"
+
+class Action_create(str, Enum):
+    save = "save"
+    publish = "publish"
+    delete = "delete"
+    back = "back_to_draft"
+    
+class Published(str, Enum):
+    aproove = "aproove"
+    deny = "deny"
+
+class Editors(str, Enum):
+    redactor = "redactor"
+    author = "author"

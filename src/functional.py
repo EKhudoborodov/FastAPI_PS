@@ -32,12 +32,6 @@ def crypt_role(role):
     else:
         role_id = 5
     return role_id
-    
-def send_roles(records):
-    roles = []
-    for pair in records:
-        roles.append(pair[1])
-    return roles
 
 def update_reviews(article_name, user_id, article_id, review, path):
     with open(path, "r") as file:
@@ -63,8 +57,6 @@ def update_reviews(article_name, user_id, article_id, review, path):
     file.close()
     return 0
     
-    
-
 #CHECK
 def field_check(field, space_check):
     for char in field:
@@ -72,55 +64,47 @@ def field_check(field, space_check):
             return 0
     return 1
 
-def ban_check(credentials):
+def authorization_editors_check(article_name, credentials):
     if credentials[0] == '5':
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
-    else: 
-        return None
+    user_id = get_user_id(credentials)
+    cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+    article_desc = list(cursor.fetchall())
+    if article_desc == []:
+        return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
+    article_id = article_desc[0][0]
+    cursor.execute(f"SELECT * FROM public.article_writer WHERE user_id={user_id} and article_id={article_id}")
+    records = list(cursor.fetchall())
+    if credentials[0] != '1' and records[0][2] != True:
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or author of this article.")
+    cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id}")
+    check = list(cursor.fetchall())
+    if check[0][1] != 1:
+        return exception(status.HTTP_400_BAD_REQUEST, "This article isn't draft.")
+    authors=get_authors_username(article_id)
+    return {'article_id': article_id, 'authors': authors}
 
-def authorization_editors_check(article_id):
-    ban = flask.session.get('ban')
-    user_roles = flask.session.get('role')
-    if user_roles == None:
-        return flask.redirect(flask.url_for('.sign_in_start'))
+def authorization_check_published(article_name, credentials):
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '2' and credentials[1] != '2':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or moderator.")
+    cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False}")
+    records = list(cursor.fetchall())
+    if records == []:
+        return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
     else:
-        user = flask.session.get('user')
-        cursor.execute(f"SELECT * FROM public.article_writer WHERE user_id={user} and article_id={article_id}")
-        records = list(cursor.fetchall())
-        if user_roles[0] == 1 or (user_roles[1] == 1 and records[0][2] == True):
-            #a - admin, m - moder, w - writer, r - reader;
-            new_publish = f"({check_writer_uploads()})"
-            return flask.render_template("editors.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish)
-        else:
-            return flask.redirect(flask.url_for('.home'))
-
-def authorization_check_published(article_name):
-    ban = flask.session.get('ban')
-    user_roles = flask.session.get('role')
-    if user_roles == None:
-        return flask.redirect(flask.url_for('.sign_in_start'))
-    elif user_roles[0] == 1 or user_roles[1] == 1:
-        #a - admin, m - moder, w - writer, r - reader;
-        new_publish = f"({check_writer_uploads()})"
-        cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False}")
-        records = list(cursor.fetchall())
-        if records == []:
-            return flask.render_template("a_published.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, no_article=1)
-        else:
-            article_id = records[0][0]
-            title = records[0][2]
-            cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id}")
-            check = list(cursor.fetchall())
-            path = f".\\articles\\{article_name}.txt"
-            text = form_text(path)
-            if check[0][1] == 2:
-                return flask.render_template("a_published.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, text=text, title=title)
-            elif check[0][1] == 3:    
-                return flask.render_template("a_published.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, text=text, title=title, aprooved=1)
-            elif check[0][1] == 4:
-                return flask.render_template("a_published.html", a = user_roles[0], m = user_roles[1], w = user_roles[2], ban = ban, new_publish=new_publish, text=text, title=title, denied=1)    
-    else:
-        return flask.redirect(flask.url_for('.home'))
+        article_id = records[0][0]
+        title = records[0][2]
+        date = records[0][5]
+        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={article_id} and status_id={2}")
+        check = list(cursor.fetchall())
+        if check == []:
+            return exception(status.HTTP_400_BAD_REQUEST, "This article isn't published.")
+        user_id = get_user_id(credentials)
+        path = f".\\articles\\{article_name}.txt"
+        text = form_text(path)
+        return {'user_id': user_id, 'article_id': article_id, 'title': title, 'article_text': text, 'article_status': 2, 'date': date}
 
 def authorization_check_draft(credentials, article):
     if credentials[0] == '5':
@@ -132,6 +116,7 @@ def authorization_check_draft(credentials, article):
         records = list(cursor.fetchall())
         if records == []:
             return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
+        article_id = records[0][0]
         title = records[0][2]
         reason = records[0][3]
         date = records[0][5]
@@ -146,7 +131,7 @@ def authorization_check_draft(credentials, article):
         new_publish = f"({check_writer_uploads()})"
         cursor.execute(f"SELECT * FROM public.article_status WHERE article_id='{records[0][0]}'")
         records = list(cursor.fetchall())
-        return {'user_id': user_id, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
+        return {'user_id': user_id, 'article_id': article_id, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
         
 def authorization_check_article(credentials, article_name):
     if credentials[0] == '5':
@@ -168,7 +153,7 @@ def authorization_check_article(credentials, article_name):
         cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id} and user_id={user_id}")
         check = list(cursor.fetchall())
         if check == []:
-            return exception(status.HTTP_400_BAD_REQUEST, "This article ism't published.")
+            return exception(status.HTTP_400_BAD_REQUEST, "This article isn't aprooved.")
         else:
             title = records[0][2]
             path = f".\\articles\\{article_name}.txt"
@@ -507,6 +492,27 @@ def get_current_date():
          res += '.'
     return res
 
+def get_authors(article_id): # get article authors in one str
+    cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}") # selecting article's authors
+    article_desc = list(cursor.fetchall())
+    authors = ""
+    for log in article_desc: # getting authors of article
+        cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
+        desc = list(cursor.fetchall())
+        authors += desc[0][3] + ", " # form str of authors
+    authors=authors[0:len(authors)-2] # remove ", " from end of authors str
+    return authors
+
+def get_authors_username(article_id): # get article authors in one str
+    cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}") # selecting article's authors
+    article_desc = list(cursor.fetchall())
+    authors = ""
+    for log in article_desc: # getting authors of article
+        cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
+        desc = list(cursor.fetchall())
+        authors += desc[0][1] + ", " # form str of authors
+    authors=authors[0:len(authors)-2] # remove ", " from end of authors str
+    return authors
 
 #SELECT
 def select_role(roles):
@@ -537,12 +543,7 @@ def select_table_desc(credentials):
         if check[0][1] == 3:
             cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}")
             article_desc = list(cursor.fetchall())
-            authors = ""
-            for log in article_desc:
-                cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
-                desc = list(cursor.fetchall())
-                authors += desc[0][3] + ", "
-            authors=authors[0:len(authors)-2]
+            authors = get_authors(article_id)
             topic = get_topic(article_id)
             reviews = get_rating(article_id)
             cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
@@ -567,12 +568,7 @@ def select_table_published(credentials):
         date = article_desc[0][5]
         cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}")
         check = list(cursor.fetchall())
-        authors = ""
-        for log in check:
-            cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
-            desc = list(cursor.fetchall())
-            authors += desc[0][3] + ", "
-        authors=authors[0:len(authors)-2]
+        authors = get_authors(article_id)
         topic = get_topic(article_id)
         reviews = 0
         views = 0
@@ -596,12 +592,7 @@ def select_table_personal(credentials):
         date = article_desc[0][5] # get date of article's creation/publication
         cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}") # select article's writers
         check = list(cursor.fetchall())
-        authors = ""
-        for log in check:
-            cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}") # select writer info
-            desc = list(cursor.fetchall())
-            authors += desc[0][3] + ", " # form str of authors
-        authors=authors[0:len(authors)-2] # remove ", " from end of authors str
+        authors = get_authors(article_id)
         topic = get_topic(article_id) # get topic id
         reviews = get_rating(article_id) # get article's rating
         cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}") # select article's views info
@@ -668,12 +659,7 @@ def select_table_recent(credentials):
         if check[0][1] == 3 and (read_check[0][2] != True or rec[5] == current_date): # checking if article is aprooved, if user read current article or article was aprooved today  
             cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={article_id}") # selecting article's authors
             article_desc = list(cursor.fetchall())
-            authors = ""
-            for log in article_desc: # getting authors of article
-                cursor.execute(f"SELECT * FROM public.users WHERE id={log[1]}")
-                desc = list(cursor.fetchall())
-                authors += desc[0][3] + ", "
-            authors=authors[0:len(authors)-2]
+            authors = get_authors(article_id)
             topic = get_topic(article_id) # getting article's topic
             reviews = get_rating(article_id) # getting article's rating 
             cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
