@@ -82,9 +82,9 @@ def sign_up(
 @app.get("/home") # watch list of recently aprooved articles
 def home(
             search_value: str = None,
-            search_field: Select_search_field = None,
-            topic_filter: Select_topic = None,
-            rate_filter: Select_rate = None,
+            search_field: Select_search_field = None, # name, author, topic, date
+            topic_filter: Select_topic = None, # science, art, history, news
+            rate_filter: Select_rate = None, # 1, 2, 3, 4, 5, >2, >3, >4, <2, <3, <4
             views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
             credentials: OAuth2PasswordRequestForm = Depends(security)
         ):
@@ -94,9 +94,9 @@ def home(
 @app.get("/archive") # watch list of aprooved articles
 def archive(
                 search_value: str = None,
-                search_field: Select_search_field = None,
-                topic_filter: Select_topic = None,
-                rate_filter: Select_rate = None,
+                search_field: Select_search_field = None, # name, author, topic, date
+                topic_filter: Select_topic = None, # science, art, history, news
+                rate_filter: Select_rate = None, # 1, 2, 3, 4, 5, >2, >3, >4, <2, <3, <4
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
             ):
@@ -202,9 +202,9 @@ def update_role(
 @app.get("/workshop") # get list of articles where user is author or redactor
 def workshop(
                 search_value: str = None,
-                search_field: Select_search_field = None,
-                topic_filter: Select_topic = None,
-                rate_filter: Select_rate = None,
+                search_field: Select_search_field = None, # name, author, topic, date
+                topic_filter: Select_topic = None, # science, art, history, news
+                rate_filter: Select_rate = None, # 1, 2, 3, 4, 5, >2, >3, >4, <2, <3, <4
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
             ):
@@ -213,7 +213,7 @@ def workshop(
 
 @app.get("/create") # create new article
 def create(
-                topic: Select_topic,
+                topic: Select_topic, # science, art, history, news
                 article_name: str = Query(min_length=3, max_length=50), 
                 title: str = Query(min_length=3, max_length=50),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
@@ -258,8 +258,8 @@ def editors_menu(article_name, credentials: OAuth2PasswordRequestForm = Depends(
 def editors_update(
                     article_name, 
                     username: str,
-                    role: Editors,
-                    action: Action_role,
+                    role: Editors, # redactor, author
+                    action: Action_role, # add, remove
                     credentials: OAuth2PasswordRequestForm = Depends(security)
                 ):
     author_desc = src.functional.authorization_editors_check(article_name, credentials) # get authors info
@@ -302,8 +302,8 @@ def get_article_info(article_name, credentials: OAuth2PasswordRequestForm = Depe
 @app.post("/create/{article_name}")
 def update_draft(
                     article_name, 
-                    action: Action_create,
-                    article: Draft = Draft(),
+                    action: Action_create, # delete, save, publish, back_to_draft
+                    article: Draft, # hashtag, title, article text
                     credentials: OAuth2PasswordRequestForm = Depends(security)
                 ):
     article_desc = src.functional.authorization_check_draft(credentials, article_name) # get article info
@@ -338,6 +338,9 @@ def update_draft(
             article_desc['article_text'] = article.article_text
             with open(path, "w") as file:
                 file.writelines(article_desc['article_text'])
+            file.close()
+        if article.hashtag != "":
+            src.functional.hashtag_add(article_desc['article_id'], article.hashtag)
     elif action == "publish" and author_check == 1:
         if article.title != "": # update if 'title' field isn't empty
             article_desc['title'] = article.title
@@ -346,9 +349,14 @@ def update_draft(
             article_desc['article_text'] = article.article_text
             with open(path, "w") as file:
                 file.writelines(article_desc['article_text'])
+            file.close()
+        if article.hashtag != "":
+            src.functional.hashtag_add(article_desc['article_id'], article.hashtag)
         article_desc['article_status'] = 2
         cursor.execute(f"UPDATE public.article_status SET status_id={2} WHERE article_id={records[0][0]}")
         cursor.execute(f"UPDATE public.article SET date='{src.functional.get_current_date()}' WHERE name='{article_name}'")
+    elif action == "back_to_draft":
+        return exception(status.HTTP_400_BAD_REQUEST, "Article is draft already.")
     else: # if redactor tries do something exept 'save'
         return exception(status.HTTP_423_LOCKED, "You aren't an author of this article.")
     conn.commit()
@@ -357,9 +365,9 @@ def update_draft(
 @app.get("/published") # get list of articles with 'published' status 
 def published(
                 search_value: str = None,
-                search_field: Select_search_field = None,
-                topic_filter: Select_topic = None,
-                rate_filter: Select_rate = None,
+                search_field: Select_search_field = None, # name, author, topic, date
+                topic_filter: Select_topic = None, # science, art, history, news
+                rate_filter: Select_rate = None, # 1, 2, 3, 4, 5, >2, >3, >4, <2, <3, <4
                 views_filter: str = Query(description="Print '>' or '<' at the begining and then number of views.", default = None),
                 credentials: OAuth2PasswordRequestForm = Depends(security)
              ):
@@ -373,7 +381,7 @@ def get_published_article(article_name, credentials: OAuth2PasswordRequestForm =
 @app.post("/published/{article_name}") # aproove or deny article with 'published' status
 def get_published_article(
                             article_name, 
-                            action: Published,
+                            action: Published, # aproove, deny
                             reason: str = Query(description="Print reason of rejection here.", default=None),
                             credentials: OAuth2PasswordRequestForm = Depends(security)
                          ):

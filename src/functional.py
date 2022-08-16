@@ -88,7 +88,7 @@ def field_check(field, space_check):
     return 1
 
 def authorization_editors_check(article_name, credentials):
-    if credentials[0] == '5':
+    if credentials[0] == '5': # check if user is banned
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     user_id = get_user_id(credentials)
     cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
@@ -108,7 +108,7 @@ def authorization_editors_check(article_name, credentials):
     return {'article_id': article_id, 'authors': authors}
 
 def authorization_check_published(article_name, credentials):
-    if credentials[0] == '5':
+    if credentials[0] == '5': # check if user is banned
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
     elif credentials[0] != '1' and credentials[0] != '2' and credentials[1] != '2':
         return exception(status.HTTP_423_LOCKED, "You aren't administrator or moderator.")
@@ -127,7 +127,8 @@ def authorization_check_published(article_name, credentials):
         user_id = get_user_id(credentials)
         path = f".\\articles\\{article_name}.txt"
         text = form_text(path)
-        return {'user_id': user_id, 'article_id': article_id, 'title': title, 'article_text': text, 'article_status': 2, 'date': date}
+        hashtags = get_hashtags(article_id)
+        return {'user_id': user_id, 'article_id': article_id, 'hashtags': hashtags, 'title': title, 'article_text': text, 'article_status': 2, 'date': date}
 
 def authorization_check_draft(credentials, article):
     if credentials[0] == '5':
@@ -151,15 +152,14 @@ def authorization_check_draft(credentials, article):
         author = is_author(records[0][0], user_id)
         path = f".\\articles\\{article}.txt"
         text = form_text(path)
-        new_publish = f"({check_writer_uploads()})"
-        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id='{records[0][0]}'")
+        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={records[0][0]}")
         records = list(cursor.fetchall())
-        return {'user_id': user_id, 'article_id': article_id, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
+        hashtags = get_hashtags(records[0][0])
+        return {'user_id': user_id, 'article_id': article_id, 'hashtags': hashtags, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
         
 def authorization_check_article(credentials, article_name):
     if credentials[0] == '5':
         return exception(status.HTTP_423_LOCKED, "You are banned on server.")
-    new_publish = f"({check_writer_uploads()})"
     if field_check(article_name, 0) == 0:
         return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
     cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}' and isdeleted = {False}")
@@ -184,7 +184,7 @@ def authorization_check_article(credentials, article_name):
             article_status = get_article_status(status_id)
             {'name': article_name, 'status': article_status, 'title': title, 'article_text': article_text}
     else:
-        #here must be tags
+        hashtags = get_hashtags(article_id)
         title = records[0][2]
         path = f".\\articles\\{article_name}.txt"
         text = form_text(path)
@@ -195,11 +195,9 @@ def authorization_check_article(credentials, article_name):
         article_status = get_article_status(status_id)
         cursor.execute(f"UPDATE public.user_read SET isread={True} WHERE user_id={user_id} and article_id={article_id} and isread={False}")
         conn.commit()
-        return {'article_id': article_id, 'name': article_name, 'status': article_status, 'topic': topic, 'rating': rate, 'title': title, 'article_text': text, 'user_review': user_review, 'reviews': reviews}
-        #path = f".\\reviews\\{article_name}.txt"
-        #reviews = form_text(path)
+        return {'article_id': article_id, 'name': article_name, 'status': article_status, 'topic': topic, 'hashtags': hashtags, 'rating': rate, 'title': title, 'article_text': text, 'user_review': user_review, 'reviews': reviews}
             
-        
+"""
 def check_writer_uploads():
     cursor.execute(f"SELECT * FROM public.article_status WHERE status_id=2")
     records = list(cursor.fetchall())
@@ -207,8 +205,9 @@ def check_writer_uploads():
     for i in records:
         res+=1
     return res
+"""
 
-def review_check(user_id, article_id, article_name):
+def review_check(user_id, article_id, article_name): # check if user has already sent his review earlier
     cursor.execute(f"SELECT * FROM public.rating WHERE user_id={user_id} and article_id={article_id} and isdeleted={False}")
     records = list(cursor.fetchall())
     rate = None
@@ -235,7 +234,7 @@ def review_check(user_id, article_id, article_name):
                 break
     return {'rating': rate, 'review': review, 'date': date}
 
-def is_author(article_id, user_id):
+def is_author(article_id, user_id): # check if user is author of article
     cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id='{article_id}' and user_id='{user_id}'")
     records = list(cursor.fetchall())
     if records[0][2] == True:
@@ -243,10 +242,10 @@ def is_author(article_id, user_id):
     else:
         return 0
 
-def search_input_check(search_field, topic, rate, views):
+def search_input_check(search_field, topic, rate, views): # check all search filter inputs
     if topic != None and topic != 'science' and topic != 'art' and topic != 'history' and topic != 'news':
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'science', 'art', 'history' or 'news'. in topic filter field.")
-    if search_field != None and search_field != 'name' and search_field != 'author' and search_field != 'topic' and search_field != 'date':
+    if search_field != None and search_field != 'name' and search_field != 'author' and search_field != 'topic' and search_field != 'date' and search_field != 'hashtags':
         return exception(status.HTTP_400_BAD_REQUEST, "Print 'name', 'author', 'topic' or 'date' in search field.")
     if rate != None and rate != '1' and rate != '2' and rate != '3' and rate != '4' and rate != '5' and rate != '>1' and rate != '>2' and rate != '>3' and rate != '>4' and rate != '>5' and rate != '<1' and rate != '<2' and rate != '<3' and rate != '<4' and rate != '<5':
         return exception(status.HTTP_400_BAD_REQUEST, "Print number from 1 to 5. Additional: Print '>' or '<' at the beggining in rate filter field.")
@@ -315,15 +314,15 @@ def form_read_columns(article_id): # function that makes read event for article 
 
 def sort_articles(array):  # function that sorts list of articles by topic
     science_array, art_array, history_array, news_array = [], [], [], []
-    for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+    for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
         if record['topic'] == "science":
-            science_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            science_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         elif record['topic'] == "art":
-            art_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            art_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         elif record['topic'] == "history":
-            history_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            history_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         elif record['topic'] == "news":
-            news_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+            news_array += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
     if science_array == []:
         science_array = None
     if art_array == []:
@@ -337,14 +336,14 @@ def sort_articles(array):  # function that sorts list of articles by topic
 def search_by_name(array, field, value): # choose articles that contain value in name, authors, topic or date.
     search_res = []
     if field == None:
-        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
-            if value in record['name'] or value in record['author'] or value in record['topic'] or value in record['date']:
-                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
+            if value in record['name'] or value in record['author'] or value in record['topic'] or value in record['date'] or value in record['hashtags']:
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         return sort_articles(search_res)
     else:
-        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
             if value in record[f"{field}"]:
-                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         return sort_articles(search_res)
 
 def search_by_rate(array, rate_filter):
@@ -353,21 +352,21 @@ def search_by_rate(array, rate_filter):
         return array
     if rate_filter[0].isdigit():
         rate = int(rate_filter)
-        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
             if record['reviews'] >= rate and record['reviews'] < rate+1:
-                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         return search_res
     else:
         rate = int(rate_filter[1])
         if rate_filter[0] == '>':
-            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
                 if record['reviews'] >= rate:
-                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
             return search_res
         elif rate_filter[0] == '<':
-            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+            for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
                 if record['reviews'] <= rate:
-                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                    search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
             return search_res
 
 def search_by_views(array, views_filter):
@@ -376,14 +375,14 @@ def search_by_views(array, views_filter):
         return array
     views = int(views_filter[1:])
     if views_filter[0] == '>':
-        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
             if record['views'] >= views:
-                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         return search_res
     else:
-        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}
+        for record in array: # record is {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}
             if record['views'] <= views:
-                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+                search_res += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
         return search_res
 
 def search_start(array, search_field, search_value, topic_filter, rate_filter, views_filter): # function for searching articles
@@ -400,6 +399,38 @@ def search_start(array, search_field, search_value, topic_filter, rate_filter, v
             return {f"{topic_filter}": array[f"{topic_filter}"]}
         array = search_by_name(array, search_field, search_value)
         return {f"{topic_filter}": array[f"{topic_filter}"]}
+
+def hashtag_add(article_id, hashtag):
+    cursor.execute(f"DELETE FROM public.article_hashtag WHERE article_id={article_id}")
+    conn.commit()
+    start = 0
+    new_tag = ""
+    for i in range(len(hashtag)):
+        if hashtag[i] == '#':
+            if start == i:
+                continue
+            elif start == i+1:
+                return exception(status.HTTP_400_BAD_REQUEST, "There are two '#' follow each other.")
+            else:
+                cursor.execute(f"SELECT * FROM public.article_hashtag WHERE article_id={article_id} and hashtag='{new_tag}'")
+                records = list(cursor.fetchall())
+                if records == []:
+                    cursor.execute(f"INSERT INTO public.article_hashtag (article_id, hashtag) VALUES ({article_id}, '{new_tag}')")
+                start = i
+                new_tag = ""
+        elif hashtag[i] == "'":
+            return exception(status.HTTP_400_BAD_REQUEST, "Hashtag field can't contain apostrophe.")
+        elif hashtag[i] == ' ':
+            new_tag += '_'
+        else:
+            new_tag += hashtag[i]
+    if new_tag != "":
+        cursor.execute(f"SELECT * FROM public.article_hashtag WHERE article_id={article_id} and hashtag='{new_tag}'")
+        records = list(cursor.fetchall())
+        if records == []:
+            cursor.execute(f"INSERT INTO public.article_hashtag (article_id, hashtag) VALUES ({article_id}, '{new_tag}')")
+    conn.commit()
+    return 0
 
 """
 def form_reviews(article_id):
@@ -537,6 +568,16 @@ def get_authors_username(article_id): # get article authors in one str
     authors=authors[0:len(authors)-2] # remove ", " from end of authors str
     return authors
 
+def get_hashtags(article_id):
+    cursor.execute(f"SELECT * FROM public.article_hashtag WHERE article_id={article_id}")
+    hashtag_desc = list(cursor.fetchall())
+    hashtags = ""
+    for rec in hashtag_desc:
+        hashtags += "#" + rec[1] + ", "
+    if hashtags != "":
+        hashtags = hashtags[0:(len(hashtags)-2)]
+    return hashtags
+
 #SELECT
 def select_role(roles):
     res = [0, 0, 0, 0]
@@ -572,7 +613,8 @@ def select_table_desc(credentials):
             cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
             views_check = list(cursor.fetchall())
             views = len(views_check)
-            array += {'name':name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
+            hashtags = get_hashtags(article_id)
+            array += {'name':name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
 def select_table_published(credentials):
@@ -595,7 +637,8 @@ def select_table_published(credentials):
         topic = get_topic(article_id)
         reviews = 0
         views = 0
-        array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
+        hashtags = get_hashtags(article_id)
+        array += {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
 def select_table_personal(credentials):
@@ -621,7 +664,8 @@ def select_table_personal(credentials):
         cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}") # select article's views info
         views_check = list(cursor.fetchall())
         views = len(views_check) # get number of article views
-        array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date},
+        hashtags = get_hashtags(article_id)
+        array += {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
 def select_reviews(credentials, article_id):
@@ -688,7 +732,8 @@ def select_table_recent(credentials):
             cursor.execute(f"SELECT * FROM public.user_read WHERE article_id={article_id} and isread={True}")
             views_check = list(cursor.fetchall())
             views = len(views_check) # get number of article views
-            array += {'name': name, 'author': authors, 'topic': topic, 'views': views, 'reviews': reviews, 'date': date}, # form array
+            hashtags = get_hashtags(article_id)
+            array += {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}, # form array
     return array
 
 

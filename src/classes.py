@@ -2,7 +2,7 @@ from enum import Enum
 from pydantic import BaseModel
 
 class Draft(BaseModel):
-    hashteg: str = ""
+    hashtag: str = ""
     title: str = ""
     article_text: str = ""
 
@@ -38,6 +38,7 @@ class Select_rate(str, Enum):
 class Select_search_field(str, Enum):
     name = "name"
     author = "author"
+    hashtags = "hashtags"
     topic = "topic"
     date = "date"
 
