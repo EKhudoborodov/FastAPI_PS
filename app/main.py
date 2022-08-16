@@ -338,11 +338,32 @@ def get_published_article(article_name, credentials: OAuth2PasswordRequestForm =
 def get_published_article(
                             article_name, 
                             action: Published,
-                            reason: str = Query(description="Print reason of rejection here.",default=None),
+                            reason: str = Query(description="Print reason of rejection here.", default=None),
                             credentials: OAuth2PasswordRequestForm = Depends(security)
                          ):
     article_desc = src.functional.authorization_check_published(article_name, credentials)
-    return article_desc
+    if action == "aproove":
+        date = src.functional.get_current_date()
+        cursor.execute(f"UPDATE public.article_status SET status_id={3} WHERE article_id={article_desc['article_id']}")
+        cursor.execute(f"UPDATE public.article SET date='{date}' WHERE id={article_desc['article_id']}")
+        src.functional.form_read_columns(article_desc['article_id'])
+        with open(f".\\reviews\\{article_name}.txt", "w") as file:
+            file.write("")
+        file.close()
+        article_desc['article_status'] = 3
+        article_desc['date'] = date
+        conn.commit()
+        return {'event': "Article is aprooved.", 'article_desc': article_desc}
+    else:
+        if reason == None or reason == "":
+            return exception(status.HTTP_400_BAD_REQUEST, "You must enter reason of rejection.")
+        date = src.functional.get_current_date()
+        cursor.execute(f"UPDATE public.article_status SET status_id={4} WHERE article_id={article_id}")
+        cursor.execute(f"UPDATE public.article SET description='{reason}', isdeleted={True}, date='{date}' WHERE id={article_id}")
+        conn.commit()
+        article_desc['article_status'] = 4
+        article_desc['date'] = date
+        return {'event': f"Article is denied. Reason: {reason}", 'article_desc': article_desc}
 
 
     

@@ -282,7 +282,7 @@ def form_article(lines): # function that puts article text in one str
         #print(new_lines)
         return new_lines
 
-def form_read_colums(article_id): # function that makes read event for each article for each user (for reboot)
+def form_read_columns(article_id): # function that makes read event for article for each user
     cursor.execute(f"SELECT * FROM public.users")
     records = list(cursor.fetchall())
     for rec in records:
