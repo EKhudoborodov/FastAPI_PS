@@ -24,13 +24,86 @@ def stop_sessions():
 """
 
 def crypt_role(role):
-    if role=='writer':
-        role_id = 3
-    elif role=='moderator':
-        role_id = 2
+    cursor.execute(f"SELECT * FROM public.role WHERE name='{role}'")
+    records = list(cursor.fetchall())
+    return records[0][0]
+
+#AUTHORIZATION
+def sign_in_user(form_data):
+    cursor.execute(f"SELECT * FROM public.users WHERE login='{form_data.username}' AND password='{form_data.password}'")
+    records = list(cursor.fetchall())
+    if records == []: # check if there is user in database
+        return exception(status.HTTP_401_UNAUTHORIZED, "Incorrect username or password.")
+    cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}")
+    user_desc = list(cursor.fetchall())
+    token = "" # form user's token
+    for desc in user_desc:
+        if desc[1] != 5:
+            token += f"{desc[1]}"
+        else:
+            token = 5
+            break
+    token += " " + form_data.username
+    return {'access_token': token}
+
+def sign_up_user(fullname, username, password, confirm_password):
+    if field_check(username, 1) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
+    if field_check(password, 1) == 0:
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in password.")   
+    if password != confirm_password:
+        return exception(status.HTTP_400_BAD_REQUEST, "Passwords are different.")
     else:
-        role_id = 5
-    return role_id
+        cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
+        records = list(cursor.fetchall())
+        if records != []: # check if there is no user in database
+            return exception(status.HTTP_400_BAD_REQUEST, "This username has already taken.") 
+        else:
+            cursor.execute(f"INSERT INTO public.users (login, password, fullname, banned) VALUES ('{username}', '{password1}', '{fullname}', {False})")
+            conn.commit() # insert user into database
+            cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
+            records = list(cursor.fetchall()) # get user information (user id)
+            cursor.execute(f"INSERT INTO public.role_user (user_id, role_id) VALUES ('{records[0][0]}', 4)")
+            conn.commit() # give user 'reader' role
+            cursor.execute(f"SELECT * FROM public.article_status WHERE status_id={3}")
+            article_desc = list(cursor.fetchall()) # get all aprooved articles
+            for article in article_desc: # mark all aprooved as 'unread' for the user
+                cursor.execute(f"INSERT INTO public.user_read (user_id, article_id, isread) VALUES ({records[0][0]}, {article[0]}, {False})")
+            conn.commit()
+            return {"username": username, "password": password}
+
+#REVIEWS
+def send_review(article_name, action, rate, review_text, credentials):
+    article_desc = authorization_check_article(credentials, article_name) # get article info
+    user_id = get_user_id(credentials)
+    user_review = article_desc['user_review']
+    article_id = article_desc['article_id']
+    date = get_current_date()
+    path = f".\\reviews\\{article_name}.txt"
+    if action == "send": # check if user sends review
+        if user_review['rating'] != None: # check if user had already written review for the article
+            update_reviews(article_name, user_id, article_id, review_text.review_text, path) # update user's review
+            cursor.execute(f"UPDATE public.rating SET date='{date}', rate={rate}, isdeleted={False} WHERE user_id={user_id} and article_id={article_id}")
+        else:
+            with open(path, "r") as file: # read file with reviews
+                lines = file.readlines()
+            file.close()
+            lines += f"{user_id}:{review_text.review_text}\n" # append user review
+            text = form_article(lines)
+            with open(path, "w") as file: # update file with reviews
+                file.write(text)
+            file.close()
+            cursor.execute(f"INSERT INTO public.rating (user_id, article_id, date, rate, isdeleted) VALUES ({user_id}, {article_id}, '{date}', {rate}, {False})")
+        event = "Review is sent."
+    else: # if user wants to delete his review
+        if user_review['rating'] == None: # check if user didn't writte review for the article
+            return exception(status.HTTP_400_BAD_REQUEST, "You didn't write review for this article.")
+        event = "Review is deleted."
+        cursor.execute(f"UPDATE public.rating SET isdeleted={True} WHERE user_id={user_id} and article_id={article_id}") # mark user review as deleted
+        delete_review(article_name, user_id, article_id, path) # remove user's review from file
+    conn.commit()
+    article_desc = authorization_check_article(credentials, article_name) # update article info
+    return {'event': event,'article_desc': article_desc}
 
 def update_reviews(article_name, user_id, article_id, review, path):
     with open(path, "r") as file:
@@ -79,6 +152,204 @@ def delete_review(article_name, user_id, article_id, path):
         file.write(text)
     file.close()
     return 0
+
+#SETTINGS FOR ADMINISTRATOR
+def update_role(username, role, action, credentials):
+    if credentials[0] == '5': # check if user is banned
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1': # check if user is administrator
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator.")
+    if field_check(username, 1) == 0: # check if administrator inputs username without spaces and apostrophes
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
+    cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
+    records = list(cursor.fetchall())
+    if records == []: # check if administrator inputs correct username
+         return exception(status.HTTP_400_BAD_REQUEST, "There is no such user in database.")
+    role_id = crypt_role(role)
+    user_id = records[0][0]
+    if role_id != 5: # check if administrator doesn't choose 'ban' in role field
+        if action == 'remove':
+            # removing user's role
+            cursor.execute(f"DELETE FROM public.role_user WHERE user_id={user_id} and role_id={role_id}")
+            conn.commit()
+            # checking if user has any other roles
+            cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={user_id}")
+            records = list(cursor.fetchall())
+            # if user has not other roles add Reader role
+            if records == []:
+                cursor.execute(f"INSERT INTO public.role_user (user_id, role_id) VALUES ({user_id}, 4)")
+                conn.commit()
+                return "Role is seccessfuly removed."
+        else:
+            # adding 'reader' role to user
+            cursor.execute(f"INSERT INTO public.role_user (user_id, role_id) VALUES ({user_id}, {role_id})")
+            cursor.execute(f"DELETE FROM public.role_user WHERE user_id={user_id} and role_id={4}")
+            conn.commit()
+            return "Role is seccessfuly added."
+    else: # if administrator chooses 'ban' in role field
+        # if administrator wants to ban user or remove user from ban list
+        if action == 'remove':
+            # giving user 'reader' role back
+            cursor.execute(f"UPDATE public.role_user SET role_id=4 WHERE user_id={user_id} and role_id={role_id}")
+            cursor.execute(f"UPDATE public.users SET banned={False} WHERE id={user_id}")
+            conn.commit()
+            return f"{username} is removed from banlist."
+        else:
+            # sending user into banlist
+            cursor.execute(f"UPDATE public.role_user SET role_id={role_id} WHERE user_id={user_id}")
+            cursor.execute(f"UPDATE public.users SET banned={True} WHERE id={user_id}")
+            conn.commit()
+            return f"{username} is banned now."
+
+#ARTICLE EDITS FOR WRITERS
+def create_article(topic, article_name, title, credentials):
+    if credentials[0] == '5': # check if user is banned
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3': # check if user is administrator or writer
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
+    elif field_check(article_name, 0) == 0: # check if user inputs article name without apostrophe
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in article name.")
+    elif field_check(title, 0) == 0: # check if user inputs title without apostrophe
+        return exception(status.HTTP_400_BAD_REQUEST, "You can't use apostrophe in title.")
+    else:
+        cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+        records = list(cursor.fetchall())
+        if records != []: # check if there isn't article in database
+            return exception(status.HTTP_400_BAD_REQUEST, "This article name has already taken.")
+        else:
+            topic_id = get_topic_id(topic)
+            user_id = get_user_id(credentials)
+            path = f".\\articles\\{article_name}.txt"
+            time = get_current_date()
+            cursor.execute(f"INSERT INTO public.article (name, title, description, isdeleted, date) VALUES ('{article_name}', '{title}', '{path}', {False}, '{time}')")
+            conn.commit()
+            cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+            records = list(cursor.fetchall())
+            cursor.execute(f"INSERT INTO public.article_status (article_id, status_id) VALUES ({records[0][0]}, 1)")
+            cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({records[0][0]}, {user_id}, {True})")
+            cursor.execute(f"INSERT INTO public.article_topic (article_id, topic_id) VALUES ({records[0][0]}, {topic_id})")
+            conn.commit()
+            with open(path, "w") as file: # create file for this article
+                file.write("")
+            file.close()
+            return "Article is created."
+
+def update_authors(article_name, username, role, action, credentials):
+    author_desc = authorization_editors_check(article_name, credentials) # get authors info
+    cursor.execute(f"SELECT * FROM public.users WHERE login='{username}'")
+    records = list(cursor.fetchall())
+    if records == []: # check if username was inputed right
+        return exception(status.HTTP_400_BAD_REQUEST, "There is no such user in database.")
+    user_id = records[0][0]
+    if action == "add":
+        if role == "redactor":
+            if username in author_desc['authors']: # if user is author of article he will become a redactor
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={False} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else: # insert user as redactor if he isn't redactor or author of article
+                cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({author_desc['article_id']}, {user_id}, {False})")
+            event=f"{username} is now redactor of this article."
+        else:
+            if username in author_desc['authors']: # if user is redactor of article he will become an author
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={True} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else: # insert user as author if he isn't redactor or author of article
+                cursor.execute(f"INSERT INTO public.article_writer (article_id, user_id, isauthor) VALUES ({author_desc['article_id']}, {user_id}, {True})")
+            event=f"{username} is now author of this article."
+    elif action == "remove":
+        if not username in author_desc['authors']: # check if username was inputed correct
+            return exception(status.HTTP_400_BAD_REQUEST, "This user isn't a redactor of this article.")
+        else:
+            if role == "redactor": # if user is removed from redactors he will lose rights to update article
+                event=f"{username} isn't redactor of this article anymore."
+                cursor.execute(f"DELETE FROM public.article_writer WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+            else: # if user is removed from authors he will become a redactor
+                event=f"{username} is now redactor of this article."
+                cursor.execute(f"UPDATE public.article_writer SET isauthor={False} WHERE article_id={author_desc['article_id']} and user_id={user_id}")
+    conn.commit()
+    author_desc = authorization_editors_check(article_name, credentials) # update authors info
+    return {'event': event, 'author_desc': author_desc}
+
+def update_draft(article_name, action, article, credentials):
+    article_desc = authorization_check_draft(credentials, article_name) # get article info
+    path = f".\\articles\\{article_name}.txt"
+    cursor.execute(f"SELECT * FROM public.article WHERE name='{article_name}'")
+    records=list(cursor.fetchall())
+    user_id = get_user_id(credentials)
+    author_check = is_author(records[0][0], user_id)
+    if action == "delete" and author_check == 1: # check if user wants to delete article
+        cursor.execute(f"UPDATE public.article SET isdeleted={True} WHERE name='{article_name}'")
+        cursor.execute(f"UPDATE public.article_status SET status_id={5} WHERE article_id={records[0][0]}")
+    elif article_desc['article_status'] != 1: # check if article has 'draft' status
+        if action == "back_to_draft" and author_check == 1: # check if user wants to send article to draft
+            cursor.execute(f"UPDATE public.article SET isdeleted={False} WHERE id={article_desc['article_id']}")
+            cursor.execute(f"UPDATE public.article_status SET status_id={1} WHERE article_id={article_desc['article_id']}")
+            cursor.execute(f"DELETE FROM public.user_read WHERE article_id={article_desc['article_id']}")
+            cursor.execute(f"DELETE FROM public.rating WHERE article_id={article_desc['article_id']}")
+            path = f".\\reviews\\{article_name}.txt"
+            with open(path, "w") as file:
+                file.write("")
+            file.close()
+            article_desc['article_status'] = 1
+            conn.commit()
+            return {'event': "Article is draft now.", 'article_info': article_desc}
+        else:
+            return {'warning': "You can't update published or deleted article.", 'article_info': article_desc}
+    elif action == "save": # 'save' is available for redactors
+        if article.title != "": # update if 'title' field isn't empty
+            article_desc['title'] = article.title
+            cursor.execute(f"UPDATE public.article SET title='{article.title}' WHERE name='{article_name}'")
+        if article.article_text != "": # update if 'article_text' field isn't empty
+            article_desc['article_text'] = article.article_text
+            with open(path, "w") as file:
+                file.writelines(article_desc['article_text'])
+            file.close()
+        if article.hashtag != "":
+            hashtag_add(article_desc['article_id'], article.hashtag)
+    elif action == "publish" and author_check == 1:
+        if article.title != "": # update if 'title' field isn't empty
+            article_desc['title'] = article.title
+            cursor.execute(f"UPDATE public.article SET title='{article.title}' WHERE name='{article_name}'")
+        if article.article_text != "": # update if 'article_text' field isn't empty
+            article_desc['article_text'] = article.article_text
+            with open(path, "w") as file:
+                file.writelines(article_desc['article_text'])
+            file.close()
+        if article.hashtag != "":
+            hashtag_add(article_desc['article_id'], article.hashtag)
+        article_desc['article_status'] = 2
+        cursor.execute(f"UPDATE public.article_status SET status_id={2} WHERE article_id={records[0][0]}")
+        cursor.execute(f"UPDATE public.article SET date='{get_current_date()}' WHERE name='{article_name}'")
+    elif action == "back_to_draft":
+        return exception(status.HTTP_400_BAD_REQUEST, "Article is draft already.")
+    else: # if redactor tries do something exept 'save'
+        return exception(status.HTTP_423_LOCKED, "You aren't an author of this article.")
+    conn.commit()
+    return article_desc
+
+#PUBLISHED FOR MODERATORS
+def update_article_status(article_name, action, reason, credentials):
+    article_desc = authorization_check_published(article_name, credentials) # get article info
+    if action == "aproove":
+        date = get_current_date()
+        cursor.execute(f"UPDATE public.article_status SET status_id={3} WHERE article_id={article_desc['article_id']}")
+        cursor.execute(f"UPDATE public.article SET date='{date}' WHERE id={article_desc['article_id']}")
+        form_read_columns(article_desc['article_id'])
+        with open(f".\\reviews\\{article_name}.txt", "w") as file:
+            file.write("")
+        file.close()
+        article_desc['article_status'] = 3
+        article_desc['date'] = date
+        conn.commit()
+        return {'event': "Article is aprooved.", 'article_desc': article_desc}
+    else:
+        if reason == None or reason == "":
+            return exception(status.HTTP_400_BAD_REQUEST, "You must enter reason of rejection.")
+        date = get_current_date()
+        cursor.execute(f"UPDATE public.article_status SET status_id={4} WHERE article_id={article_id}")
+        cursor.execute(f"UPDATE public.article SET description='{reason}', isdeleted={True}, date='{date}' WHERE id={article_id}")
+        conn.commit()
+        article_desc['article_status'] = 4
+        article_desc['date'] = date
+        return {'event': f"Article is denied. Reason: {reason}", 'article_desc': article_desc}
 
 #CHECK
 def field_check(field, space_check):
@@ -412,6 +683,9 @@ def hashtag_add(article_id, hashtag):
             elif start == i+1:
                 return exception(status.HTTP_400_BAD_REQUEST, "There are two '#' follow each other.")
             else:
+                if new_tag == "_":
+                    conn.comit()
+                    return 0
                 cursor.execute(f"SELECT * FROM public.article_hashtag WHERE article_id={article_id} and hashtag='{new_tag}'")
                 records = list(cursor.fetchall())
                 if records == []:
@@ -424,7 +698,10 @@ def hashtag_add(article_id, hashtag):
             new_tag += '_'
         else:
             new_tag += hashtag[i]
-    if new_tag != "":
+    if new_tag == "_":
+        conn.comit()
+        return 0
+    elif new_tag != "":
         cursor.execute(f"SELECT * FROM public.article_hashtag WHERE article_id={article_id} and hashtag='{new_tag}'")
         records = list(cursor.fetchall())
         if records == []:
