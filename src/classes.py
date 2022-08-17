@@ -55,9 +55,13 @@ class Action_create(str, Enum):
     back = "back_to_draft"
     
 class Published(str, Enum):
-    aproove = "aproove"
+    approve = "approve"
     deny = "deny"
 
 class Editors(str, Enum):
     redactor = "redactor"
     author = "author"
+    
+class Sessions_action(str, Enum):
+    stop_all_sessions = "stop_all_sessions"
+    stop_sessions_except = "stop_sessions_except"
