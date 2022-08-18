@@ -16,22 +16,23 @@ def sign_in_user(form_data): # main: "/sign_in"
     records = list(cursor.fetchall())
     if records == []: # check if there is user in database
         return exception(status.HTTP_401_UNAUTHORIZED, "Incorrect username or password.")
-    cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}")
+    cursor.execute(f"SELECT * FROM public.role_user WHERE user_id={records[0][0]}") # get user's roles
     user_desc = list(cursor.fetchall())
-    token = "" # form user's token
+    # form user's token
+    token = "" 
     for desc in user_desc:
         if desc[1] != 5:
             token += f"{desc[1]}"
         else:
             token = 5
             break
-    token += " " + form_data.username
-    stop_sessions_check(records[0][0], 1)
-    save_event("sign_in", f"{form_data.username} signed in.", records[0][0])
+    token += " " + form_data.username # token "{roles} {username}"
+    stop_sessions_check(records[0][0], 1) # check if administrator stopped sessions
+    save_event("sign_in", f"{form_data.username} signed in.", records[0][0]) # save user's 'sign in' event
     return {'access_token': token}
 
 def sign_up_user(fullname, username, password, confirm_password): # main: "/sign_up"
-    stop_sessions_check(0, 1)
+    stop_sessions_check(0, 1) # check if administrator stopped sessions
     if field_check(username, 1) == 0:
         return exception(status.HTTP_400_BAD_REQUEST, "You can't use space or apostrophe in username.")
     if field_check(password, 1) == 0:
@@ -88,6 +89,7 @@ def stop_sessions_check(user_id, sign_in): # check if administrator stopped all 
         desc = get_time_defference(date1, date2, time1, time2)
         if desc['greater'] == 2: # check if 'stop sessions' event was launched after user's request
             return exception(status.HTTP_423_LOCKED, "Server's sessions was stopped. You need to sign in again.")
+        return 0
     current_date = get_current_date()
     current_time = get_current_time()
     if sign_in == 1: # check if 'stop sessions' event was launched after user tries to sign in
@@ -95,7 +97,7 @@ def stop_sessions_check(user_id, sign_in): # check if administrator stopped all 
         if check['difference']<=3600: # check if user tries to sign in when 'stop sessions' event was launched less than hour ago
             return exception(status.HTTP_423_LOCKED, "Server's sessions was stopped. Try later.") 
         return 0
-    return exception(status.HTTP_423_LOCKED, "Something went wrong...") 
+    return exception(status.HTTP_423_LOCKED, "Something went wrong...") # everything is right
 
 #REVIEWS
 def send_review(article_name, action, rate, review_text, credentials): # main:"/archive/{article_name}"
@@ -114,7 +116,7 @@ def send_review(article_name, action, rate, review_text, credentials): # main:"/
             with open(path, "r") as file: # read file with reviews
                 lines = file.readlines()
             file.close()
-            lines += f"{user_id}:{review_text.review_text}\n" # append user review
+            lines += f"\n{user_id}:{review_text.review_text}\n" # append user review
             text = form_article(lines)
             with open(path, "w") as file: # update file with reviews
                 file.write(text)
@@ -347,6 +349,35 @@ def update_authors(article_name, username, role, action, credentials): # main: "
     save_event("authors_update", event, writer_id)
     return {'event': event, 'author_desc': author_desc}
 
+def authorization_check_draft(credentials, article): # main: "/create/{article_name}"
+    user_id = get_user_id(credentials) # get user id
+    stop_sessions_check(user_id, 0) # check if administrator stopped sessions
+    if credentials[0] == '5':
+        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
+    elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
+        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
+    else:
+        cursor.execute(f"SELECT * FROM public.article WHERE name='{article}'")
+        records = list(cursor.fetchall())
+        if records == []:
+            return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
+        article_id = records[0][0]
+        title = records[0][2]
+        reason = records[0][3]
+        date = records[0][5]
+        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={records[0][0]} and user_id={user_id}")
+        recs = list(cursor.fetchall())
+        if recs == []:
+            return exception(status.HTTP_423_LOCKED, "You aren't author or redactor of this article.")
+        author = is_author(records[0][0], user_id)
+        path = f".\\articles\\{article}.txt"
+        text = form_text(path)
+        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={records[0][0]}")
+        records = list(cursor.fetchall())
+        hashtags = get_hashtags(records[0][0])
+        return {'user_id': user_id, 'article_id': article_id, 'hashtags': hashtags, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
+
+
 def update_draft(article_name, action, article, credentials): # main: "/create/{article_name}"
     user_id = get_user_id(credentials) # get user id
     stop_sessions_check(user_id, 0) # check if administrator stopped sessions
@@ -385,6 +416,7 @@ def update_draft(article_name, action, article, credentials): # main: "/create/{
             file.close()
         if article.hashtag != "":
             hashtag_add(article_desc['article_id'], article.hashtag)
+            article_desc['hashtags'] = get_hashtags(article_desc['article_id']) # update article tags
         event=f"{article_name} is saved."
     elif action == "publish" and author_check == 1:
         if article.title != "": # update if 'title' field isn't empty
@@ -397,6 +429,7 @@ def update_draft(article_name, action, article, credentials): # main: "/create/{
             file.close()
         if article.hashtag != "":
             hashtag_add(article_desc['article_id'], article.hashtag)
+            article_desc['hashtags'] = get_hashtags(article_desc['article_id']) # update article tags
         article_desc['article_status'] = 2
         cursor.execute(f"UPDATE public.article_status SET status_id={2} WHERE article_id={records[0][0]}")
         cursor.execute(f"UPDATE public.article SET date='{get_current_date()}' WHERE name='{article_name}'")
@@ -436,7 +469,7 @@ def authorization_check_published(article_name, credentials):
 
 def update_article_status(article_name, action, reason, credentials): # main: "/published/{article_name}"
     article_desc = authorization_check_published(article_name, credentials) # get article info
-    user_id = get_user_id()
+    user_id = get_user_id(credentials)
     if action == "approve":
         date = get_current_date()
         cursor.execute(f"UPDATE public.article_status SET status_id={3} WHERE article_id={article_desc['article_id']}")
@@ -468,36 +501,8 @@ def field_check(field, space_check):
         if char == "'" or (char == " " and space_check == 1):
             return 0
     return 1
-
-def authorization_check_draft(credentials, article): # main: "/create/{article_name}"
-    user_id = get_user_id(credentials) # get user id
-    stop_sessions_check(user_id, 0) # check if administrator stopped sessions
-    if credentials[0] == '5':
-        return exception(status.HTTP_423_LOCKED, "You are banned on server.")
-    elif credentials[0] != '1' and credentials[0] != '3' and credentials[1] != '3':
-        return exception(status.HTTP_423_LOCKED, "You aren't administrator or writer.")
-    else:
-        cursor.execute(f"SELECT * FROM public.article WHERE name='{article}'")
-        records = list(cursor.fetchall())
-        if records == []:
-            return exception(status.HTTP_404_NOT_FOUND, "There is no such article in database.")
-        article_id = records[0][0]
-        title = records[0][2]
-        reason = records[0][3]
-        date = records[0][5]
-        cursor.execute(f"SELECT * FROM public.article_writer WHERE article_id={records[0][0]} and user_id={user_id}")
-        recs = list(cursor.fetchall())
-        if recs == []:
-            return exception(status.HTTP_423_LOCKED, "You aren't author or redactor of this article.")
-        author = is_author(records[0][0], user_id)
-        path = f".\\articles\\{article}.txt"
-        text = form_text(path)
-        cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={records[0][0]}")
-        records = list(cursor.fetchall())
-        hashtags = get_hashtags(records[0][0])
-        return {'user_id': user_id, 'article_id': article_id, 'hashtags': hashtags, 'title': title, 'article_text': text, 'article_status': records[0][1], 'date': date}
         
-def authorization_check_article(credentials, article_name):
+def authorization_check_article(credentials, article_name): # main: "/archive/{article_name}"
     user_id = get_user_id(credentials) # get user id
     stop_sessions_check(user_id, 0) # check if administrator stopped sessions
     if credentials[0] == '5':
@@ -623,7 +628,7 @@ def hashtag_add(article_id, hashtag):
         if hashtag[i] == '#':
             if start == i:
                 continue
-            elif start == i+1:
+            elif start == i-1:
                 return exception(status.HTTP_400_BAD_REQUEST, "There are two '#' follow each other.")
             else:
                 if new_tag == "_":
@@ -733,12 +738,12 @@ def search_start(array, search_field, search_value, topic_filter, rate_filter, v
     if topic_filter == None:
         if search_value == None:
             return sort_articles(array)
-        return search_by_name(array, search_field, search_value)
+        return search_by_name(array, search_field, search_value) # update article list with search value
     else:
         if search_value == None:
             array = sort_articles(array)
             return {f"{topic_filter}": array[f"{topic_filter}"]}
-        array = search_by_name(array, search_field, search_value)
+        array = search_by_name(array, search_field, search_value) # update article list with search value
         return {f"{topic_filter}": array[f"{topic_filter}"]}
 
 #GET
@@ -955,6 +960,21 @@ def select_table_personal(credentials): # main: "/workshop" (select user's artic
         array += {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date},
     return array
 
+def add_status_to_array(desc):
+    new_desc = []
+    for topic in desc:
+        if desc[f"{topic}"] == None:
+            continue
+        for record in desc[f"{topic}"]:
+            cursor.execute(f"SELECT * FROM public.article WHERE name='{record['name']}'")
+            records=list(cursor.fetchall())
+            cursor.execute(f"SELECT * FROM public.article_status WHERE article_id={records[0][0]}")
+            article_desc = list(cursor.fetchall())
+            article_status = get_article_status(article_desc[0][1])
+            new_desc += {'name': record['name'], 'author': record['author'], 'topic': record['topic'], 'status': article_status, 'hashtags': record['hashtags'], 'views': record['views'], 'reviews': record['reviews'], 'date': record['date']},
+    return new_desc
+    
+
 def select_reviews(credentials, article_id): # main: "/archive/{article_name}" (select all article reciews)
     # output dict {author, username, rate, review, date}
     user_id = get_user_id(credentials) # get user id
@@ -1024,9 +1044,6 @@ def select_table_recent(credentials): # main: "/home" (select articles approved 
             hashtags = get_hashtags(article_id) # get article's hashtags
             array += {'name': name, 'author': authors, 'topic': topic, 'hashtags': hashtags, 'views': views, 'reviews': reviews, 'date': date}, # form array
     return array
-
-if __name__ == '__main__':
-    print(str(datetime.datetime.now()))
 
 """  
 #TESTS

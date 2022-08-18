@@ -1,0 +1,6 @@
+1)Added events config to database.
+All events on server are saved now.
+2)Added session settings to administrator.
+Administrator can now stop sessions on server for one hour.
+3)Added some more code comments.
+4)Writers can see article status of their articles in workshop page.

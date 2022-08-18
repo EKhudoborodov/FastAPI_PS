@@ -1,4 +1,4 @@
-import os, psycopg2, uvicorn, src.functional, requests
+import os, psycopg2, uvicorn, src.functional
 from enum import Enum
 from src.classes import Draft, Review, Action_review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field, Action_create, Published, Editors, Sessions_action
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ from src.exceptions import exception
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
+#Tags for docs
 tags_metadata = [
     {
         "name": "Authorization",
@@ -66,11 +67,13 @@ def sign_up(
            ):
     return src.functional.sign_up_user(fullname, username, password, confirm_password)
 
-@app.get("/sign_in_with_VK", tags=['Authorization'])
+"""
+@app.get("/sign_in_with_VK", tags=['Authorization']) # Not working
 def VK_sign_in():
     app_id = 81403665
     secret_key = "8JvGjXTibUXRJIv7jumo"
     return None
+"""
 
 @app.get("/home", tags=['Read articles']) # watch list of recently approved articles
 def home(
@@ -133,7 +136,8 @@ def workshop(
                 credentials: OAuth2PasswordRequestForm = Depends(security)
             ):
     workshop_array = src.functional.select_table_personal(credentials) # get list of all user's artiles
-    return src.functional.search_start(workshop_array, search_field, search_value, topic_filter, rate_filter, views_filter) # choose articles according to search filters
+    workshop_array = src.functional.search_start(workshop_array, search_field, search_value, topic_filter, rate_filter, views_filter) # choose articles according to search filters
+    return src.functional.add_status_to_array(workshop_array)
 
 @app.get("/create", tags=['Write articles']) # create new article
 def create(
