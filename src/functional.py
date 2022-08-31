@@ -97,7 +97,7 @@ def stop_sessions_check(user_id, sign_in): # check if administrator stopped all 
         if check['difference']<=3600: # check if user tries to sign in when 'stop sessions' event was launched less than hour ago
             return exception(status.HTTP_423_LOCKED, "Server's sessions was stopped. Try later.") 
         return 0
-    return exception(status.HTTP_423_LOCKED, "Something went wrong...") # everything is right
+    # return exception(status.HTTP_423_LOCKED, "Something went wrong...") # everything is right
 
 #REVIEWS
 def send_review(article_name, action, rate, review_text, credentials): # main:"/archive/{article_name}"
@@ -116,8 +116,11 @@ def send_review(article_name, action, rate, review_text, credentials): # main:"/
             with open(path, "r") as file: # read file with reviews
                 lines = file.readlines()
             file.close()
-            lines += f"\n{user_id}:{review_text.review_text}\n" # append user review
-            text = form_article(lines)
+            if lines == []:
+                lines += f"{user_id}:{review_text.review_text}" # append user review
+            else:
+                lines += f"{user_id}:{review_text.review_text}" + "\n" # append user review
+            text = form_review(lines)
             with open(path, "w") as file: # update file with reviews
                 file.write(text)
             file.close()
@@ -152,7 +155,7 @@ def update_reviews(article_name, user_id, article_id, review, path):
             new_lines += f"{user_id}:{review}\n"
         else:
             new_lines += line
-    text = form_article(new_lines)
+    text = form_review(new_lines)
     with open(path, "w") as file:
         file.write(text)
     file.close()
@@ -176,7 +179,7 @@ def delete_review(article_name, user_id, article_id, path):
             continue
         else:
             new_lines += line
-    text = form_article(new_lines)
+    text = form_review(new_lines)
     with open(path, "w") as file:
         file.write(text)
     file.close()
@@ -611,6 +614,22 @@ def form_article(lines): # function that puts article text in one str
         #print(new_lines)
         return new_lines
 
+def form_review(lines): # function that puts article's review in one str
+    if lines == []:
+        return None
+    else:
+        new_lines = ""
+        for i in range(len(lines)-1):
+            if lines[i] == "\n" and lines[i+1].isdigit():
+                new_lines += "\n"
+            elif lines[i] == "\n" and not lines[i+1].isdigit():
+                new_lines += "\\" + "n"
+            else:
+                new_lines += lines[i]
+        new_lines += lines[len(lines)-1]
+        #print(new_lines)
+        return new_lines
+
 def form_read_columns(article_id): # function that makes read event for article for each user
     cursor.execute(f"SELECT * FROM public.users")
     records = list(cursor.fetchall())
@@ -998,6 +1017,8 @@ def select_reviews(credentials, article_id): # main: "/archive/{article_name}" (
                     break
                 else:
                     author_id += line[i]
+            if author_id == "\n":
+                continue
             if int(author_id) == int(user_id):
                 continue
             else:

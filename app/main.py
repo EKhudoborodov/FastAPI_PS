@@ -1,4 +1,5 @@
 import os, psycopg2, uvicorn, src.functional
+#from flask import redirect
 from enum import Enum
 from src.classes import Draft, Review, Action_review, Action_role, Select_role, Select_rate, Select_topic, Select_search_field, Action_create, Published, Editors, Sessions_action
 from pydantic import BaseModel
@@ -70,9 +71,9 @@ def sign_up(
 """
 @app.get("/sign_in_with_VK", tags=['Authorization']) # Not working
 def VK_sign_in():
-    app_id = 81403665
-    secret_key = "8JvGjXTibUXRJIv7jumo"
-    return None
+    app_id = 51403668
+    secret_key = "movGjXTibUXRJIv7juvG"
+    return redirect(f"https://oauth.vk.com/authorize?client_id={app_id}&client_secret={secret_key}&redirect_uri=https://localhost:8432/docs&response_type=code&scope=email")
 """
 
 @app.get("/home", tags=['Read articles']) # watch list of recently approved articles
